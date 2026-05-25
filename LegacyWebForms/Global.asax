@@ -1,1 +1,1 @@
-<%@ Application Codebehind="Global.asax.cs" Inherits="LegacyWebForms.Global" Language="C#" %>
+<%@ Application Codebehind="Global.asax.cs" Inherits="LegacyWebForms.InventoryApp" Language="C#" %>

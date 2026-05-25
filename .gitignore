@@ -6,3 +6,6 @@ App_Data/*.db
 *.suo
 packages/
 *.nupkg
+.claude/
+.nuget/
+WebFormsSample/
