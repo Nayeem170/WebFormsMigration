@@ -18,6 +18,7 @@ namespace LegacyWebForms
                 BindFilterDropDown();
                 ViewState["SortField"] = "Id";
                 ViewState["SortDir"]   = "ASC";
+                productSummary.Bind();
                 BindGrid();
             }
         }
@@ -37,10 +38,7 @@ namespace LegacyWebForms
             string cat        = ddlFilter.SelectedValue;
             string activeVal  = ddlActiveFilter.SelectedValue;
 
-            var all = _products.GetAll(includeDeleted: activeVal == "inactive");
-            productSummary.Bind(activeVal == "inactive" ? _products.GetAll() : all);
-
-            var query = all.AsEnumerable();
+            var query = _products.GetAll(includeDeleted: activeVal == "inactive").AsEnumerable();
             if (!string.IsNullOrEmpty(cat)) query = query.Where(p => p.Category == cat);
             if (activeVal == "active")        query = query.Where(p => p.IsActive && p.Stock > 0);
             else if (activeVal == "inactive") query = query.Where(p => !p.IsActive || p.Stock == 0 || p.IsDeleted);
@@ -171,6 +169,7 @@ namespace LegacyWebForms
             }
 
             gvProducts.EditIndex = -1;
+            productSummary.Bind();
             productDetail.Hide();
             BindGrid();
 
@@ -186,6 +185,7 @@ namespace LegacyWebForms
 
         protected void addProduct_ProductAdded(object sender, ProductEventArgs e)
         {
+            productSummary.Bind();
             BindGrid();
         }
 

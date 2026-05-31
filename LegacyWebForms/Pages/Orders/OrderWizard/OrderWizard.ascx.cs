@@ -6,11 +6,11 @@ using System.Web.UI.WebControls;
 
 namespace LegacyWebForms
 {
-    public partial class OrderWizardControl : UserControl
-    {
+        public partial class OrderWizardControl : UserControl
+        {
         private const string CartSessionKey = "CartItems";
 
-        public event EventHandler<OrderEventArgs> OrderPlaced = default!;
+            public event EventHandler<OrderEventArgs> OrderPlaced = default!;
 
         private List<OrderItem> CartItems
         {
@@ -171,6 +171,7 @@ namespace LegacyWebForms
                 Status        = AppConstants.OrderStatus.Pending,
                 Priority      = rblPriority.SelectedValue,
                 Extras        = SelectedExtras(),
+                Total         = total,
                 Items         = cart
             };
 
