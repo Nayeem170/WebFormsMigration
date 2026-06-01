@@ -17,7 +17,7 @@ namespace LegacyWebForms.Services
             _log = log;
         }
 
-        public System.Collections.Generic.List<Product> GetAll(bool includeDeleted = false)
+        public List<Product> GetAll(bool includeDeleted = false)
         {
             return _repo.GetAll(includeDeleted);
         }

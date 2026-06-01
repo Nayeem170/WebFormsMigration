@@ -17,11 +17,14 @@ namespace LegacyWebForms
 
             var logPath = Path.Combine(HttpRuntime.AppDomainAppPath, "App_Data", "logs", "app.log");
             Directory.CreateDirectory(Path.GetDirectoryName(logPath));
-            var listener = new TextWriterTraceListener(logPath, "file")
+            if (Trace.Listeners["file"] == null)
             {
-                TraceOutputOptions = TraceOptions.DateTime
-            };
-            Trace.Listeners.Add(listener);
+                var listener = new TextWriterTraceListener(logPath, "file")
+                {
+                    TraceOutputOptions = TraceOptions.DateTime
+                };
+                Trace.Listeners.Add(listener);
+            }
             Trace.AutoFlush = true;
         }
 

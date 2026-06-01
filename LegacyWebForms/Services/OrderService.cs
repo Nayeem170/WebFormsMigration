@@ -66,6 +66,8 @@ namespace LegacyWebForms.Services
         public int PlaceOrder(Order order)
         {
             if (order == null) throw new ArgumentNullException(nameof(order));
+            if (order.Items == null || !order.Items.Any())
+                throw new ArgumentException("Order must contain at least one item.", nameof(order));
             Validate(order);
             foreach (var item in order.Items)
                 Validate(item);
@@ -106,6 +108,7 @@ namespace LegacyWebForms.Services
             }
             existing.Status = status;
             existing.Priority = priority;
+            Validate(existing);
             db.SaveChanges();
             _log.Info(string.Format("Order #{0} status changed to {1}", orderId, status));
         }
