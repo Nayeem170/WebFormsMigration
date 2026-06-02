@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using LegacyWebForms.Core;
+using LegacyWebForms.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace LegacyWebForms.Services
