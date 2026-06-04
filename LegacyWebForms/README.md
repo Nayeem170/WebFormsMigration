@@ -1,242 +1,188 @@
-# LegacyWebForms
+# LegacyWebForms: Inventory Manager
 
-A complete ASP.NET WebForms 4.8 inventory management demo covering every major WebForms control and pattern. Built as Phase 1 of a CoreWebForms migration study — the goal is to have a realistic legacy app to migrate to .NET 9 via [CoreWebForms](https://github.com/dotnet/systemweb-adapters).
+ASP.NET WebForms 4.8 inventory management app backed by EF Core 3.1 and SQLite. No authentication, no tests, local development only.
 
-## Purpose
+## Quick Start
 
-- Showcase all WebForms controls that CoreWebForms can support
-- Provide a real, data-driven app (not a hello-world) to migrate in Phase 2
-- Run locally via IIS Express without Visual Studio
+```bash
+dotnet build LegacyWebForms\LegacyWebForms.csproj
+```
 
-## Pages
-
-| Page | Route | Description |
-|------|-------|-------------|
-| Dashboard | `/` | Stats, recent orders, expandable category browser |
-| Products | `/Products.aspx` | Browse by category + full CRUD grid |
-| Orders | `/Orders.aspx` | Multi-step order wizard + order management |
-
-## WebForms Controls Used
-
-| Control | Where |
-|---------|-------|
-| `Literal` | Dashboard stat cards |
-| `Repeater` + `AlternatingItemTemplate` | Dashboard recent orders, Orders history |
-| `Repeater` (nested) + `DataList` | Products — active products by category |
-| `Repeater` + `ItemCommand` | Dashboard — expandable category list |
-| `BulletedList` | Dashboard out-of-stock, Orders confirmation summary |
-| `DataList` + `AlternatingItemTemplate` | Products — products per category card grid |
-| `GridView` — sort, page, select, inline edit, delete | Products management, Orders management |
-| `DetailsView` | Products — row detail panel |
-| `Panel` (toggle visibility) | Products add-product form |
-| `MultiView` / `View` | Orders — 3-step wizard |
-| `Calendar` | Orders — delivery date picker |
-| `UpdatePanel` + `AsyncPostBackTrigger` | Orders — live estimated total |
-| `RadioButtonList` | Orders — priority selection |
-| `CheckBoxList` | Orders — add-ons selection |
-| `DropDownList` (AutoPostBack) | Products filter, Orders product picker |
-| `ValidationSummary` | Products add form, Orders step 1 |
-| `RequiredFieldValidator` | Multiple fields across Products and Orders |
-| `RangeValidator` | Price, stock, quantity fields |
-| `RegularExpressionValidator` | Email field in Orders |
-| `CustomValidator` | Orders — delivery date must be future |
-| `LinkButton` | Products — toggle add form |
+Open in Visual Studio (F5) or launch IIS Express manually on port 5080. The SQLite database and seed data (12 products, 12 orders) are auto-created on first request at `App_Data/inventory.db`. Delete this file to re-seed.
 
 ## Tech Stack
 
-- **Framework**: ASP.NET WebForms on .NET 4.8
-- **Database**: SQLite via `System.Data.SQLite.Core` 1.0.118.0
-- **Native interop**: `Stub.System.Data.SQLite.Core.NetFramework` 1.0.118.0 (provides `SQLite.Interop.dll`)
-- **Server**: IIS Express (x86) on port 8080
-- **Build**: MSBuild 17 (VS 2022)
-- **Package restore**: nuget.exe 7.6.x (`.nuget\nuget.exe`)
-- **C# version**: `LangVersion: latest` (enables C# 8 switch expressions in .NET 4.8)
+| Layer | Technology |
+|------|-----------|
+| Framework | ASP.NET WebForms 4.8, `net48`, C# latest, nullable enabled |
+| ORM | EF Core 3.1.32 with SQLite |
+| UI | WebForms pages + user controls, custom combo.js autocomplete, site.js confirm dialog |
+| Logging | `System.Diagnostics.Trace` + file listener outputting to `App_Data/logs/app.log` |
 
-## Database
+## Architecture
 
-SQLite file created at `App_Data\inventory.db` on first run. Schema:
+```mermaid
+graph TD
+    PAGE["ASPX Pages\n(inherits AppPage)"] --> SC["ServiceContainer"]
+    SC --> PS["ProductService"]
+    SC --> OS["OrderService"]
 
-```
-Products (Id, Name, Category, Price, Stock, IsActive, AddedDate)
-Orders   (Id, CustomerName, CustomerEmail, ProductId, ProductName,
-          Quantity, UnitPrice, OrderDate, DeliveryDate, Status, Priority, Extras)
-```
+    PS --> PR["ProductRepository"]
+    OS --> OR["OrderRepository\n(read-only)"]
 
-Seeded with 12 products across 5 categories and 6 sample orders. `Extras` stored as comma-separated string.
+    PS --> LOG["AppLogger"]
+    OS --> LOG
 
-## Project Structure
+    PR -->|"per-call context"| CTX1["AppDbContext"]
+    OR -->|"per-call context"| CTX2["AppDbContext"]
+    OS -->|"owned transactional context"| CTX3["AppDbContext"]
 
-```
-LegacyWebForms/
-├── App_Data/               # SQLite DB created here at runtime
-├── Properties/
-│   └── AssemblyInfo.cs
-├── .vscode/
-│   └── tasks.json          # restore → build → run tasks
-├── AppData.cs              # SQLite data access layer (models + CRUD)
-├── Global.asax / .cs       # DB initialization on Application_Start
-├── Site.Master / .cs       # Master page: nav, ScriptManager, CSS
-├── Default.aspx / .cs      # Dashboard
-├── Products.aspx / .cs     # Products browse + management
-├── Orders.aspx / .cs       # Order wizard + order management
-├── web.config              # UnobtrusiveValidationMode=None
-├── packages.config
-└── LegacyWebForms.csproj
+    CTX1 --> DB[(SQLite)]
+    CTX2 --> DB
+    CTX3 --> DB
 ```
 
-## Running Locally
+`AppData` is a static composition root that constructs all dependencies at startup. All pages access services through `AppData.Services.Products.*` and `AppData.Services.Orders.*`. No DI framework is used because WebForms creates pages and controls via reflection, making constructor injection impossible.
 
-### Prerequisites
+Two context lifetime patterns coexist:
 
-- Windows
-- Visual Studio 2022 (for MSBuild + IIS Express)
-- IIS Express installed (comes with VS 2022)
+- **Per-call (repositories):** Each repo opens a short-lived `AppDbContext` with `using var db = CreateDbContext()`, performs one operation, and disposes it.
+- **Owned transactional (OrderService mutations):** `PlaceOrder`, `DeleteOrder` hold a single context open across multiple operations within a transaction, then dispose on completion.
 
-### First run
-
-Restore NuGet packages and build:
+## Project Layout
 
 ```
-# From repo root (D:\Programming\.Net\CoreWebForms)
-.nuget\nuget.exe restore LegacyWebForms.sln
+Core/           AppConstants, AppPage (base class), ILogger interface, AppLogger
+Services/       ProductService, OrderService (business logic layer)
+Data/          IProductRepository, ProductRepository, IOrderRepository, OrderRepository,
+               AppDbContext, DbSeeder (interfaces beside their implementations)
+Models/        Product, Order, OrderItem, EventModels
+Pages/         Default (Dashboard), Products, Orders (each with multiple child controls)
+Helpers/       UiHelper (status badge HTML), GridViewHelper (sort arrow rendering)
+Scripts/       site.js (global confirm dialog), combo.js (product autocomplete box)
 ```
 
-Or use the VS Code tasks (Ctrl+Shift+P → **Tasks: Run Task**):
+## Pages
 
-| Task | Action |
-|------|--------|
-| `restore` | nuget.exe restore packages |
-| `build` | MSBuild compile |
-| `run` | build + launch IIS Express + open browser |
+### Dashboard (`Pages/Default/`)
 
-App runs at **http://localhost:8080**.
+Uses a single-fetch pattern: `Products.GetAll()` is called once and the result is passed to StatCards, CategoryExpand, and OutOfStock. Two additional DB calls fetch order count and pending order count. Total: 4 DB calls per page load.
 
-### NuGet packages location
+### Products (`Pages/Products/`)
 
-Packages restore to `D:\Programming\.Net\CoreWebForms\packages\`. The SQLite native DLL (`SQLite.Interop.dll`) is copied to `bin\x86\` and `bin\x64\` automatically via the MSBuild targets file imported from the Stub package.
+GridView with in-memory sorting and filtering (Name, Category, Price, Stock, active/inactive status). Supports inline editing, a read-only detail panel, and an add-product panel. `ProductSummary` always reflects the live catalog regardless of the active/inactive filter.
 
-## Key Implementation Notes
+### Orders (`Pages/Orders/`)
 
-- **`EmptyDataTemplate` not supported on `DataList`** — only `GridView` and `DetailsView` support it. DataList inside Repeaters omit the empty template.
-- **`UpdatePanel` namespace**: `System.Web.UI.UpdatePanel`, not `System.Web.UI.WebControls.UpdatePanel`.
-- **Validator jQuery requirement disabled**: `web.config` sets `ValidationSettings:UnobtrusiveValidationMode=None` so validators work without jQuery.
-- **IIS Express runs x86**: loads `bin\x86\SQLite.Interop.dll`. The MSBuild targets import handles copying both x86 and x64 binaries.
-- **C# Dev Kit warning**: VS Code's C# Dev Kit does not support traditional .NET Framework `.csproj` format. Intellisense is limited, but build and run via tasks.json work fine.
+Uses a coordinator pattern: `Orders.aspx.cs` owns three child controls wired together through events.
 
-## Implementation Details
+| Control | Role |
+|---------|------|
+| **OrderWizard** | 3-step wizard: select products from a custom autocomplete dropdown, review order, then confirm. Cart is stored in Session and persists across page loads. |
+| **OrderHistory** | Paginated list using `GetPaged(skip, take)` with a shared `OrdersTable` repeater. Shows all orders including deleted ones (visually dimmed). |
+| **OrdersManage** | Full GridView with inline edit, status filter, sort, and soft-delete. Deletion requires a confirm dialog and blocks delivered orders via a two-layer guard (disabled button + server re-check). |
 
-### Data Layer — `AppData.cs`
+**Event flow:**
 
-Single static class. No ORM. Raw ADO.NET via `System.Data.SQLite`.
+- **OrderPlaced** → rebinds all three controls (wizard needs fresh stock, history and manage need the new order).
+- **OrderDeleted** → rebinds only history (manage already rebinds itself internally; the wizard is intentionally left stale and self-corrects on the next full page load or order placement).
 
-- `Initialize(appDataPath)` — called from `Global.asax Application_Start`. Creates `App_Data/` if missing, builds connection string, runs `CREATE TABLE IF NOT EXISTS`, seeds once via `HasData()` count check.
-- Every method opens a fresh `SQLiteConnection` and disposes it via `using`. No connection pooling or shared state beyond the connection string `_cs`.
-- `decimal` ↔ SQLite `REAL`: stored as `(double)price`, read back as `(decimal)reader.GetDouble(...)`.
-- `bool IsActive` ↔ SQLite `INTEGER`: stored as `1`/`0`, read as `GetInt32(...) == 1`.
-- `DateTime` ↔ SQLite `TEXT`: stored as `"yyyy-MM-dd"` or `"yyyy-MM-dd HH:mm:ss"`, read via `DateTime.Parse(reader.GetString(...))`.
-- `List<string> Extras` ↔ SQLite `TEXT`: stored as comma-joined string, split on read. Empty string → empty list.
-- `last_insert_rowid()` appended to `INSERT` in same command text; `ExecuteScalar()` returns `long`, cast to `int`.
+## Service Layer
 
-**Models:**
+### ProductService
 
-```csharp
-class Product { int Id; string Name, Category; decimal Price; int Stock; bool IsActive; DateTime AddedDate; }
-class Order   { int Id; string CustomerName, CustomerEmail, ProductName, Status, Priority;
-                int ProductId, Quantity; decimal UnitPrice; DateTime OrderDate, DeliveryDate;
-                List<string> Extras; decimal Total => Quantity * UnitPrice; }
+Full CRUD operations delegated to `ProductRepository`. `Add` and `Update` validate models with `Validator.TryValidateObject` at the service boundary. `Update` enforces a one-way invariant: if `Stock` reaches zero, `IsActive` is forced to `false` regardless of what the caller sets.
+
+### OrderService
+
+Read methods delegate to `OrderRepository`. Write methods bypass the read-only repository entirely and open their own `AppDbContext` with a transaction.
+
+| Method | Transaction | Cross-entity touch |
+|--------|------------|-------------------|
+| `PlaceOrder` | Yes | Creates Order + OrderItems, decrements Product stock |
+| `UpdateStatus` | No | Sets Status/Priority on an existing Order, validates via DataAnnotation regex |
+| `DeleteOrder` | Yes | Restores Product stock from OrderItems, auto-reactivates products where `Stock > 0` |
+
+`OrderRepository` is intentionally read-only because every order mutation also modifies Product entities, requiring cross-entity atomic transactions that a read-only repository cannot provide.
+
+## Data Model
+
+```mermaid
+classDiagram
+    class Product {
+        +int Id
+        +string Name
+        +string Category
+        +decimal Price
+        +int Stock
+        +bool IsActive
+        +bool IsDeleted
+        +DateTime AddedDate
+    }
+    class Order {
+        +int Id
+        +string CustomerName
+        +string CustomerEmail
+        +DateTime OrderDate
+        +DateTime DeliveryDate
+        +string Status
+        +string Priority
+        +string Extras
+        +decimal Total
+        +bool IsDeleted
+    }
+    class OrderItem {
+        +int Id
+        +int OrderId
+        +int ProductId
+        +string ProductName
+        +int Quantity
+        +decimal UnitPrice
+    }
+    Order "1" --o "*" OrderItem : OrderId FK
+    Product "1" --o "*" OrderItem : ProductId ref
 ```
 
-**CRUD surface:**
+Notable storage details:
 
-| Method | SQL |
-|--------|-----|
-| `GetProducts()` | `SELECT * FROM Products ORDER BY Id` |
-| `GetProduct(id)` | `SELECT * FROM Products WHERE Id=@id` |
-| `AddProduct(p)` | `INSERT … SELECT last_insert_rowid()` |
-| `UpdateProduct(p)` | `UPDATE Products SET … WHERE Id=@id` |
-| `DeleteProduct(id)` | `DELETE FROM Products WHERE Id=@id` |
-| `GetOrders()` | `SELECT * FROM Orders ORDER BY OrderDate DESC` |
-| `GetOrder(id)` | `SELECT * FROM Orders WHERE Id=@id` |
-| `AddOrder(o)` | `INSERT … SELECT last_insert_rowid()` |
-| `UpdateOrder(o)` | `UPDATE Orders SET Status, Priority WHERE Id=@id` |
-| `DeleteOrder(id)` | `DELETE FROM Orders WHERE Id=@id` |
+- `Product.IsActive` and `Product.IsDeleted` use `HasConversion<int>()` because SQLite has no native boolean type (stored as 0/1).
+- `Order.Extras` is `List<string>` persisted as a pipe-delimited string. The pipe character is chosen over comma because commas in extra values (e.g., "Express delivery, priority") would silently corrupt the data on roundtrip.
+- `OrderItem` is marked `[Serializable]` to support StateServer or SQLServer session modes if the app is ever migrated.
+- No concurrency tokens (`RowVersion`) are configured because SQLite's EF Core provider silently ignores them.
 
----
+## Key Decisions
 
-### Dashboard — `Default.aspx`
+| Decision | Rationale |
+|----------|-----------|
+| Manual DI, no framework | WebForms pages/controls are created by reflection, so constructor injection is not possible. Adding a framework would only add property injection boilerplate. |
+| Repositories are pure CRUD | Business logic lives in the service layer, keeping repos simple and focused on data access. |
+| OrderRepository is read-only | Order mutations always span Order + Product entities and require transactions, so writes bypass the repo. |
+| Extras delimiter is pipe (`\|`) | Commas in extra values would silently split into multiple entries when the string is round-tripped. |
+| `\A`/`\z` regex anchors | Standard `^`/`$` anchors match line boundaries, not string boundaries, which could allow multi-line bypass in regex validators. |
+| File logging in code, not web.config | `TextWriterTraceListener` resolves relative paths against the IIS Express install directory, not the app root. |
+| `ViewStateUserKey = SessionID` | Folds the session ID into the ViewState HMAC, rejecting postbacks from a different session as a CSRF defense. |
 
-**Stat cards** — four `<asp:Literal>` controls set in code-behind with counts from in-memory LINQ over `AppData.GetProducts()` / `AppData.GetOrders()`.
+## Build and Run
 
-**Recent Orders Repeater** — `rptOrders` bound to `orders.Take(6)`. Uses `AlternatingItemTemplate` (alternating row background via inline style) to demonstrate both templates. Status displayed as plain text (no badges — keeps Dashboard read-only).
+```bash
+dotnet build LegacyWebForms\LegacyWebForms.csproj
+```
 
-**Expandable Categories** — `rptCatExpand` (Repeater) bound to `AppData.Categories` (a `List<string>`). Each item renders:
-- A `LinkButton` with `CommandName="toggle"` and `CommandArgument=category`
-- An `<asp:Panel>` whose `Visible` is set via `<%# (bool)Eval("Expanded") %>`
-- An `<asp:Literal>` emitting an HTML `<ul>` of product names via `GetProductList(Eval("ProductNames"))`
+IIS Express may lock the output DLL during builds. If you get a file-lock error, stop IIS Express first:
 
-Anonymous type used as data source: `new { Category, Count, Expanded, ProductNames }`. `ViewState["ExpandedCat"]` stores the currently expanded category; clicking the same category again collapses it (toggle). `ItemCommand` handler updates ViewState and rebinds without full `BindDashboard()`.
+```powershell
+Stop-Process -Name iisexpress
+```
 
-**Out of Stock** — `blOutOfStock` (`BulletedList`, `BulletStyle="Disc"`). Shows product names with `Stock == 0`, or a single "All products in stock" item.
+## Detailed Documentation
 
----
+Full implementation documentation with diagrams, code walkthroughs, and API references lives in `docs/`:
 
-### Products — `Products.aspx`
-
-**Browse by Category section** — outer `rptCategories` (Repeater) iterates `AppData.Categories`. `OnItemDataBound` handler finds the inner `dlCatProducts` (DataList) via `FindControl`, filters `AppData.GetProducts()` to active products in that category, and binds. DataList uses `RepeatColumns="4"` horizontal layout with `AlternatingItemTemplate` for alternating card background. `EmptyDataTemplate` is NOT used (DataList does not support it).
-
-**Add Product Panel** — `pnlAdd` hidden by default. `lnkAddProduct` (LinkButton) toggles `pnlAdd.Visible`. Panel contains `ValidationSummary` + `RequiredFieldValidator` / `RangeValidator` on all fields, scoped to `ValidationGroup="AddProduct"`. On save: parses price/stock, inserts via `AppData.AddProduct`, clears fields, shows `lblAddResult` success message, rebinds grid.
-
-**Filter row** — `ddlFilter` (category DropDownList, `AutoPostBack=true`) + `chkActiveOnly` (CheckBox, `AutoPostBack=true`, default checked). Both fire `ddlFilter_Changed` → resets `PageIndex` to 0, rebinds grid.
-
-**GridView (`gvProducts`)** — `DataKeyNames="Id"`. Sort state in `ViewState["SortField"]` / `ViewState["SortDir"]`. Sort uses C# 8 switch expression over field name. Paging: `PageSize=5`. Columns:
-- `BoundField` for Id (ReadOnly)
-- `TemplateField` for Name (TextBox in edit), Category (DropDownList in edit with `SelectedValue='<%# Bind("Category") %>'`), Price (TextBox), Stock (TextBox), Status (badge span / CheckBox)
-- `CommandField` with Select + Edit + Delete buttons
-
-`RowUpdating`: reads edit controls via `FindControl`, loads product from DB, updates fields, calls `AppData.UpdateProduct`. `RowDeleting`: deletes from DB, resets to page 0.
-
-**DetailsView (`dvProduct`)** — shown inside `pnlDetail` when a GridView row is selected. Bound to a single-element anonymous-type array with formatted strings (e.g. `Price.ToString("C")`). `AutoGenerateRows=true`. Hidden on filter change, delete, or edit entry.
-
----
-
-### Orders — `Orders.aspx`
-
-**Layout** — two-column top section (wizard left, history right) plus full-width Manage Orders grid below.
-
-**Order Wizard — `MultiView` / `View`**
-
-Three `<asp:View>` inside `mvOrder`. Active view controlled by `SetStep(int step)` which sets `mvOrder.ActiveViewIndex` and toggles CSS classes on `pnlStep1/2/3` (step indicator Panels).
-
-- **Step 1 (Order Info)**:
-  - `ddlProduct` (DropDownList, `AutoPostBack=true`) → `Product_Changed` → `RefreshTotal()`
-  - `txtQty` (TextBox, `AutoPostBack=true`) → `Product_Changed` → `RefreshTotal()`
-  - `upTotal` (UpdatePanel, `UpdateMode=Conditional`) wraps `litTotal`. Triggers on both controls → partial-page refresh showing live estimated total without full postback.
-  - `txtCustomerName`, `txtEmail` with `RequiredFieldValidator` and `RegularExpressionValidator` (`\S+@\S+\.\S+`)
-  - `rblPriority` (RadioButtonList, horizontal flow): Low / Normal (default) / High
-  - `cblExtras` (CheckBoxList, horizontal): Gift wrap / Express delivery / Insurance
-  - `calDelivery` (Calendar, day selection mode) + `cvDate` (CustomValidator): `cvDate_ServerValidate` checks `calDelivery.SelectedDate > DateTime.Today`
-  - All fields in `ValidationGroup="Step1"`. `btnNext` triggers server validation before advancing.
-
-- **Step 2 (Review)**: Read-only table of `Literal` controls (`litRevProduct`, `litRevQty`, etc.) populated in `btnNext_Click`. Back button returns to step 0. Place Order button (no validation) calls `btnConfirm_Click`.
-
-- **Step 3 (Confirmed)**: Shows order ID in `litOrderId`. `blSummary` (BulletedList) lists order details. "Place Another Order" button resets all fields and returns to step 0.
-
-**`btnConfirm_Click`**: constructs `Order` object, calls `AppData.AddOrder`, populates step 3 controls, rebinds history Repeater, calls `SetStep(2)`.
-
-**Order History Repeater (`rptHistory`)** — right-side panel, read-only. Bound to `AppData.GetOrders()`. `GetStatusBadge(string status)` (C# 8 switch expression on the page class) returns colored `<span class="badge ...">` HTML used in `<%# GetStatusBadge(Eval("Status").ToString()) %>`.
-
-**Manage Orders GridView (`gvOrders`)** — full-width below. Sort via `ViewState["OrderSortField"]`/`"OrderSortDir"`. Edit mode exposes `ddlEditStatus` (Pending/Processing/Shipped/Delivered) and `ddlEditPriority` (Low/Normal/High). `RowDataBound` handler pre-selects current values by calling `Items.FindByValue(...).Selected = true` for both dropdowns. `RowUpdating` loads order from DB via `AppData.GetOrder(id)`, updates Status + Priority, saves. `RowDeleting` also rebinds the history Repeater so both views stay in sync.
-
----
-
-### Master Page — `Site.Master`
-
-Contains `<asp:ScriptManager ID="ScriptManager1" runat="server" />` — required globally for `UpdatePanel` and client-side validators. Two `ContentPlaceHolder`s: `HeadContent` (for page-specific head tags) and `MainContent` (page body).
-
-Nav links use `runat="server"` on `<a>` tags so ASP.NET resolves `~/` relative to app root. CSS is inline in the master page: dark blue `#1e3a5f` header, white card system, badge classes (`.badge-green/blue/yellow/gray`), grid table styles, wizard step indicators, and product card layout.
-
----
-
-## Phase 2
-
-Migrate this project to .NET 9 using CoreWebForms (`Microsoft.AspNetCore.SystemWebAdapters`), which wraps the existing `.aspx` / `.aspx.cs` files to run on ASP.NET Core.
+| Document | Covers |
+|----------|--------|
+| [index.md](docs/index.md) | Architecture diagrams, layer call flow, component interaction, startup flow, quick reference table |
+| [core.md](docs/core.md) | Core layer interfaces, AppConstants, AppPage, ILogger/AppLogger, Global.asax startup, AppData composition root, ServiceContainer, ProductService, OrderService |
+| [data.md](docs/data.md) | AppDbContext configuration, context lifetime patterns, ProductRepository CRUD, OrderRepository queries, DbSeeder, all models, SQLite schema DDL |
+| [pages.md](docs/pages.md) | Page lifecycle, Site.Master nav, Dashboard single-fetch, Products inline edit + filters, Orders coordinator + wizard + history + manage, shared controls |
+| [frontend.md](docs/frontend.md) | combo.js autocomplete state machine, site.js confirm dialog flow, UiHelper status badges, GridViewHelper sort arrows, UpdatePanel regions, badge CSS classes |
+| [config.md](docs/config.md) | web.config settings, .csproj build config, ErrorPage.aspx, security model, deployment checklist |
