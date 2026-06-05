@@ -1,0 +1,12 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run IIS Express",
+            "type": "node",
+            "request": "launch",
+            "preLaunchTask": "run",
+            "program": "${workspaceFolder}\\bin\\LegacyWebForms.dll"
+        }
+    ]
+}

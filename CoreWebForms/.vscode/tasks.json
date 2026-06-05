@@ -1,0 +1,35 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "restore",
+            "type": "process",
+            "command": "${workspaceFolder}\\..\\.nuget\\nuget.exe",
+            "args": [
+                "restore",
+                "${workspaceFolder}\\..\\LegacyWebForms.sln"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "build",
+            "type": "process",
+            "command": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\MSBuild\\Current\\Bin\\MSBuild.exe",
+            "args": [
+                "${workspaceFolder}\\LegacyWebForms.csproj",
+                "/p:Configuration=Debug",
+                "/p:VSToolsPath=C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\MSBuild\\Microsoft\\VisualStudio\\v17.0"
+            ],
+            "dependsOn": "restore",
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "run",
+            "type": "shell",
+            "command": "Start-Process 'C:\\Program Files (x86)\\IIS Express\\iisexpress.exe' -ArgumentList '/path:${workspaceFolder} /port:8080'; Start-Sleep 2; Start-Process 'http://localhost:8080'",
+            "dependsOn": "build",
+            "problemMatcher": []
+        }
+    ]
+}
