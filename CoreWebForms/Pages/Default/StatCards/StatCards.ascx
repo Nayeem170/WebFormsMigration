@@ -1,4 +1,4 @@
-<%@ Control Language="C#" AutoEventWireup="true" CodeBehind="StatCards.ascx.cs" Inherits="LegacyWebForms.StatCardsControl" %>
+<%@ Control Language="C#" AutoEventWireup="true" CodeBehind="StatCards.ascx.cs" Inherits="CoreWebForms.StatCardsControl" %>
 <div class="stats">
         <a href="~/Pages/Products/Products.aspx" runat="server" class="sc">
         <div class="sc-label">Total Products</div>

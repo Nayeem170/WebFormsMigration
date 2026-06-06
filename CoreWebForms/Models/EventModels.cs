@@ -1,6 +1,6 @@
 using System;
 
-namespace LegacyWebForms
+namespace CoreWebForms
 {
     public class ProductEventArgs : EventArgs
     {

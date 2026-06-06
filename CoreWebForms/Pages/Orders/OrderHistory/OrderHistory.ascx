@@ -1,4 +1,4 @@
-<%@ Control Language="C#" AutoEventWireup="true" CodeBehind="OrderHistory.ascx.cs" Inherits="LegacyWebForms.OrderHistoryControl" %>
+<%@ Control Language="C#" AutoEventWireup="true" CodeBehind="OrderHistory.ascx.cs" Inherits="CoreWebForms.OrderHistoryControl" %>
 <%@ Register TagPrefix="uc" TagName="OrdersTable" Src="~/Pages/Shared/OrdersTable/OrdersTable.ascx" %>
 <asp:UpdatePanel ID="upHistory" runat="server" UpdateMode="Conditional">
 <ContentTemplate>

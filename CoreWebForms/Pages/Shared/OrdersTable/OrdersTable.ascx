@@ -1,5 +1,5 @@
-<%@ Control Language="C#" AutoEventWireup="true" CodeBehind="OrdersTable.ascx.cs" Inherits="LegacyWebForms.OrdersTableControl" %>
-<%@ Import Namespace="LegacyWebForms" %>
+<%@ Control Language="C#" AutoEventWireup="true" CodeBehind="OrdersTable.ascx.cs" Inherits="CoreWebForms.OrdersTableControl" %>
+<%@ Import Namespace="CoreWebForms" %>
 <asp:Repeater ID="rptTable" runat="server">
     <HeaderTemplate>
         <table class="grid" style="width:100%">

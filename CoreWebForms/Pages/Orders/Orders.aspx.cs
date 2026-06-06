@@ -1,7 +1,7 @@
 using System;
 using System.Web.UI;
 
-namespace LegacyWebForms
+namespace CoreWebForms
 {
     public partial class OrdersPage : AppPage
     {

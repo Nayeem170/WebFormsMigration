@@ -1,6 +1,6 @@
 using System;
 
-namespace LegacyWebForms.Core
+namespace CoreWebForms.Core
 {
     public interface ILogger
     {

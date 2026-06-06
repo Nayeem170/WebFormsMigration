@@ -1,4 +1,4 @@
-<%@ Page Title="Orders" Language="C#" MasterPageFile="~/Layout/Site.Master" AutoEventWireup="true" CodeBehind="Orders.aspx.cs" Inherits="LegacyWebForms.OrdersPage" %>
+<%@ Page Title="Orders" Language="C#" MasterPageFile="~/Layout/Site.Master" AutoEventWireup="true" CodeBehind="Orders.aspx.cs" Inherits="CoreWebForms.OrdersPage" %>
 <%@ Register TagPrefix="uc" TagName="PageHeader"    Src="~/Pages/Shared/PageHeader/PageHeader.ascx"  %>
 <%@ Register TagPrefix="uc" TagName="OrderWizard"   Src="OrderWizard/OrderWizard.ascx"  %>
 <%@ Register TagPrefix="uc" TagName="OrderHistory"   Src="OrderHistory/OrderHistory.ascx"  %>

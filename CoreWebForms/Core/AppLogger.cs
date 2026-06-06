@@ -1,7 +1,7 @@
 using System;
 using System.Diagnostics;
 
-namespace LegacyWebForms.Core
+namespace CoreWebForms.Core
 {
     public class AppLogger : ILogger
     {

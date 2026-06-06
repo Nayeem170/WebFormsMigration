@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace LegacyWebForms
+namespace CoreWebForms
 {
     public static class AppConstants
     {

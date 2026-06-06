@@ -1,4 +1,4 @@
-<%@ Control Language="C#" AutoEventWireup="true" CodeBehind="ProductDetail.ascx.cs" Inherits="LegacyWebForms.ProductDetailControl" %>
+<%@ Control Language="C#" AutoEventWireup="true" CodeBehind="ProductDetail.ascx.cs" Inherits="CoreWebForms.ProductDetailControl" %>
 <asp:Panel ID="pnlDetail" runat="server" Visible="false" CssClass="card">
     <div class="ch"><span class="ct">Product Details</span>
         <asp:LinkButton ID="lnkCloseDetail" runat="server" CssClass="action-link" OnClick="lnkCloseDetail_Click">Close</asp:LinkButton>

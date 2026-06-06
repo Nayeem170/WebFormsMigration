@@ -3,7 +3,7 @@ using System.Linq;
 using System.Web.UI;
 using System.Web.UI.WebControls;
 
-namespace LegacyWebForms
+namespace CoreWebForms
 {
     public partial class OrderHistoryControl : UserControl
     {

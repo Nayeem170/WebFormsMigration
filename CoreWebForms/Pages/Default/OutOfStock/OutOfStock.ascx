@@ -1,5 +1,5 @@
-<%@ Control Language="C#" AutoEventWireup="true" CodeBehind="OutOfStock.ascx.cs" Inherits="LegacyWebForms.OutOfStockControl" %>
-<%@ Import Namespace="LegacyWebForms" %>
+<%@ Control Language="C#" AutoEventWireup="true" CodeBehind="OutOfStock.ascx.cs" Inherits="CoreWebForms.OutOfStockControl" %>
+<%@ Import Namespace="CoreWebForms" %>
 <div class="card">
     <div class="ch">
         <span class="ct">Out of Stock</span>

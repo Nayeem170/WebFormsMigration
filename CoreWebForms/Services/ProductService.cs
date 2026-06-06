@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
-using LegacyWebForms.Core;
-using LegacyWebForms.Data;
+using CoreWebForms.Core;
+using CoreWebForms.Data;
 
-namespace LegacyWebForms.Services
+namespace CoreWebForms.Services
 {
     public class ProductService
     {

@@ -1,5 +1,5 @@
-<%@ Control Language="C#" AutoEventWireup="true" CodeBehind="OrdersManage.ascx.cs" Inherits="LegacyWebForms.OrdersManageControl" %>
-<%@ Import Namespace="LegacyWebForms" %>
+<%@ Control Language="C#" AutoEventWireup="true" CodeBehind="OrdersManage.ascx.cs" Inherits="CoreWebForms.OrdersManageControl" %>
+<%@ Import Namespace="CoreWebForms" %>
 <asp:UpdatePanel ID="upOrders" runat="server" UpdateMode="Conditional">
 <ContentTemplate>
 <div class="card">

@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace LegacyWebForms.Data
+namespace CoreWebForms.Data
 {
     public interface IProductRepository
     {

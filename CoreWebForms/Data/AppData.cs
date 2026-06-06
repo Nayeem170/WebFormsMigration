@@ -2,12 +2,12 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using LegacyWebForms.Core;
-using LegacyWebForms.Data;
-using LegacyWebForms.Services;
+using CoreWebForms.Core;
+using CoreWebForms.Data;
+using CoreWebForms.Services;
 using Microsoft.EntityFrameworkCore;
 
-namespace LegacyWebForms
+namespace CoreWebForms
 {
     public static class AppData
     {

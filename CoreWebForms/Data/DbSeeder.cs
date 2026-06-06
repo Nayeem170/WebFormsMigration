@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace LegacyWebForms
+namespace CoreWebForms
 {
     internal class DbSeeder
     {

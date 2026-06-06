@@ -1,4 +1,4 @@
-<%@ Page Title="Dashboard" Language="C#" MasterPageFile="~/Layout/Site.Master" AutoEventWireup="true" CodeBehind="Default.aspx.cs" Inherits="LegacyWebForms.DefaultPage" %>
+<%@ Page Title="Dashboard" Language="C#" MasterPageFile="~/Layout/Site.Master" AutoEventWireup="true" CodeBehind="Default.aspx.cs" Inherits="CoreWebForms.DefaultPage" %>
 <%@ Register TagPrefix="uc" TagName="PageHeader"  Src="~/Pages/Shared/PageHeader/PageHeader.ascx"  %>
 <%@ Register TagPrefix="uc" TagName="OrdersTable" Src="~/Pages/Shared/OrdersTable/OrdersTable.ascx" %>
 <%@ Register TagPrefix="uc" TagName="StatCards"    Src="StatCards/StatCards.ascx"         %>

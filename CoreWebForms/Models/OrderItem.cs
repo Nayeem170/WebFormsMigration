@@ -1,7 +1,7 @@
 using System;
 using System.ComponentModel.DataAnnotations;
 
-namespace LegacyWebForms
+namespace CoreWebForms
 {
     [Serializable]
     public class OrderItem

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.EntityFrameworkCore;
 
-namespace LegacyWebForms.Data
+namespace CoreWebForms.Data
 {
     public class ProductRepository : IProductRepository
     {
@@ -21,7 +21,7 @@ namespace LegacyWebForms.Data
         public Product GetById(int id)
         {
             using (var db = AppData.CreateDbContext())
-                return db.Products.AsNoTracking().FirstOrDefault(p => p.Id == id);
+                return db.Products.AsNoTracking().FirstOrDefault(p => p.Id == id)!;
         }
 
         public int Add(Product p)

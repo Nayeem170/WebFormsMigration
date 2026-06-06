@@ -1,4 +1,4 @@
-<%@ Control Language="C#" AutoEventWireup="true" CodeBehind="ProductSummary.ascx.cs" Inherits="LegacyWebForms.ProductSummaryControl" %>
+<%@ Control Language="C#" AutoEventWireup="true" CodeBehind="ProductSummary.ascx.cs" Inherits="CoreWebForms.ProductSummaryControl" %>
 <div class="stats">
     <div class="sc">
         <div class="sc-label">Total Products</div>

@@ -1,4 +1,4 @@
-<%@ Control Language="C#" AutoEventWireup="true" CodeBehind="AddProductPanel.ascx.cs" Inherits="LegacyWebForms.AddProductPanelControl" %>
+<%@ Control Language="C#" AutoEventWireup="true" CodeBehind="AddProductPanel.ascx.cs" Inherits="CoreWebForms.AddProductPanelControl" %>
 <div style="margin-bottom:14px;display:flex;justify-content:flex-end">
     <asp:LinkButton ID="lnkAddProduct" runat="server" CssClass="btn btn-primary" OnClick="lnkAddProduct_Click">+ Add Product</asp:LinkButton>
 </div>

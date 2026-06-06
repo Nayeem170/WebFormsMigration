@@ -1,6 +1,6 @@
 using System;
 using System.ComponentModel.DataAnnotations;
-namespace LegacyWebForms
+namespace CoreWebForms
 {
     public class Product
     {

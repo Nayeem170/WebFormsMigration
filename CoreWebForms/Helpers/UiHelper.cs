@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Web;
 
-namespace LegacyWebForms
+namespace CoreWebForms
 {
     public static class UiHelper
     {
