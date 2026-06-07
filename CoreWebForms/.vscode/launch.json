@@ -2,11 +2,18 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Run IIS Express",
-            "type": "node",
+            "name": "Launch CoreWebForms",
+            "type": "coreclr",
             "request": "launch",
-            "preLaunchTask": "run",
-            "program": "${workspaceFolder}\\bin\\LegacyWebForms.dll"
+            "preLaunchTask": "build",
+            "program": "${workspaceFolder}/../artifacts/bin/Debug/net/net9.0/CoreWebForms.exe",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "env": {
+                "ASPNETCORE_ENVIRONMENT": "Development",
+                "ASPNETCORE_URLS": "http://localhost:8081"
+            }
         }
     ]
 }
