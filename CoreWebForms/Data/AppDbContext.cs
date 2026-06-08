@@ -1,8 +1,9 @@
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
-namespace LegacyWebForms
+namespace CoreWebForms
 {
     public class AppDbContext : DbContext
     {
@@ -34,8 +35,9 @@ namespace LegacyWebForms
             {
                 e.HasKey(o => o.Id);
                 e.Property(o => o.Extras).HasConversion(
-                    v => string.Join("|", v),
-                    v => string.IsNullOrEmpty(v) ? new List<string>() : v.Split('|').ToList());
+                    new ValueConverter<List<string>, string>(
+                        v => string.Join("|", v),
+                        v => (v == null || v.Length == 0) ? new List<string>() : v.Split(new[] { '|' }, StringSplitOptions.None).ToList()));
                 e.Property(o => o.IsDeleted).HasConversion<int>();
                 e.HasMany(o => o.Items).WithOne().HasForeignKey(i => i.OrderId);
             });
