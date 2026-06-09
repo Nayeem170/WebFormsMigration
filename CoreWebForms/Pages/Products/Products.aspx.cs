@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Web.UI;
 using System.Web.UI.WebControls;
-using LegacyWebForms.Services;
+using CoreWebForms.Services;
 
-namespace LegacyWebForms
+namespace CoreWebForms
 {
     public partial class ProductsPage : AppPage
     {

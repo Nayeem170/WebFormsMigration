@@ -1,23 +1,29 @@
-# LegacyWebForms: Inventory Manager
+# CoreWebForms: Inventory Manager
 
-ASP.NET WebForms 4.8 inventory management app backed by EF Core 3.1 and SQLite. No authentication, no tests, local development only.
+ASP.NET Core inventory management app migrated from ASP.NET WebForms 4.8 using `CoreWebForms.Sdk`. Runs on .NET 9 with Kestrel self-hosting, EF Core 9, and SQLite. No authentication, no tests, local development only.
+
+> **Migrated from** [`../LegacyWebForms/`](../LegacyWebForms/) — see [`docs/migration/`](docs/migration/) for the step-by-step migration guide.
 
 ## Quick Start
 
 ```bash
-dotnet build LegacyWebForms\LegacyWebForms.csproj
+dotnet build CoreWebForms.csproj
 ```
 
-Open in Visual Studio (F5) or launch IIS Express manually on port 5080. The SQLite database and seed data (12 products, 12 orders) are auto-created on first request at `App_Data/inventory.db`. Delete this file to re-seed.
+Press **F5** in VS Code. The browser opens automatically when the server is ready. The SQLite database and seed data (12 products, 12 orders) are auto-created on first run at `App_Data/inventory.db`. Delete this file to re-seed.
+
+URL: `http://localhost:8081`
 
 ## Tech Stack
 
 | Layer | Technology |
-|------|-----------|
-| Framework | ASP.NET WebForms 4.8, `net48`, C# latest, nullable enabled |
-| ORM | EF Core 3.1.32 with SQLite |
-| UI | WebForms pages + user controls, custom combo.js autocomplete, site.js confirm dialog |
-| Logging | `System.Diagnostics.Trace` + file listener outputting to `App_Data/logs/app.log` |
+|-------|-----------|
+| Framework | ASP.NET Core on .NET 9, `CoreWebForms.Sdk 1.0.0`, Kestrel |
+| WebForms bridge | `Microsoft.AspNetCore.SystemWebAdapters` via `CoreWebForms.Sdk` |
+| ORM | EF Core 9.0.17 with SQLite |
+| ASPX compilation | Runtime Roslyn compilation via `EnableRuntimeAspxCompilation=true` |
+| Session | `IDistributedCache`-backed session with JSON serializer |
+| Logging | `System.Diagnostics.Trace` + file listener → `App_Data/logs/app.log` |
 
 ## Architecture
 
@@ -42,68 +48,50 @@ graph TD
     CTX3 --> DB
 ```
 
-`AppData` is a static composition root that constructs all dependencies at startup. All pages access services through `AppData.Services.Products.*` and `AppData.Services.Orders.*`. No DI framework is used because WebForms creates pages and controls via reflection, making constructor injection impossible.
-
-Two context lifetime patterns coexist:
-
-- **Per-call (repositories):** Each repo opens a short-lived `AppDbContext` with `using var db = CreateDbContext()`, performs one operation, and disposes it.
-- **Owned transactional (OrderService mutations):** `PlaceOrder`, `DeleteOrder` hold a single context open across multiple operations within a transaction, then dispose on completion.
+`AppData` is a static composition root initialized in `Program.cs` after `builder.Build()`. Pages access services via `AppData.Services.Products.*` and `AppData.Services.Orders.*`. No DI framework — WebForms creates pages and controls via reflection, making constructor injection impossible.
 
 ## Project Layout
 
 ```
 Core/           AppConstants, AppPage (base class), ILogger interface, AppLogger
 Services/       ProductService, OrderService (business logic layer)
-Data/          IProductRepository, ProductRepository, IOrderRepository, OrderRepository,
-               AppDbContext, DbSeeder (interfaces beside their implementations)
-Models/        Product, Order, OrderItem, EventModels
-Pages/         Default (Dashboard), Products, Orders (each with multiple child controls)
-Helpers/       UiHelper (status badge HTML), GridViewHelper (sort arrow rendering)
-Scripts/       site.js (global confirm dialog), combo.js (product autocomplete box)
+Data/           IProductRepository, ProductRepository, IOrderRepository, OrderRepository,
+                AppDbContext, DbSeeder (interfaces beside their implementations)
+Models/         Product, Order, OrderItem, EventModels
+Pages/          Default (Dashboard), Products, Orders (each with multiple child controls)
+Helpers/        UiHelper (status badge HTML), GridViewHelper (sort arrow rendering)
+Scripts/        site.js (global confirm dialog), combo.js (product autocomplete box)
+Program.cs      ASP.NET Core host setup, middleware pipeline, route registration
 ```
 
 ## Pages
 
 ### Dashboard (`Pages/Default/`)
 
-Uses a single-fetch pattern: `Products.GetAll()` is called once and the result is passed to StatCards, CategoryExpand, and OutOfStock. Two additional DB calls fetch order count and pending order count. Total: 4 DB calls per page load.
+Single-fetch pattern: `Products.GetAll()` called once, result passed to StatCards, CategoryExpand, and OutOfStock. Two additional DB calls fetch order count and pending order count. Total: 4 DB calls per page load.
 
 ### Products (`Pages/Products/`)
 
-GridView with in-memory sorting and filtering (Name, Category, Price, Stock, active/inactive status). Supports inline editing, a read-only detail panel, and an add-product panel. `ProductSummary` always reflects the live catalog regardless of the active/inactive filter.
+GridView with in-memory sorting and filtering. Supports inline editing, read-only detail panel, and add-product panel. `ProductSummary` always reflects the live catalog regardless of active/inactive filter.
 
 ### Orders (`Pages/Orders/`)
 
-Uses a coordinator pattern: `Orders.aspx.cs` owns three child controls wired together through events.
+Coordinator pattern: `Orders.aspx.cs` owns three child controls wired through events.
 
 | Control | Role |
 |---------|------|
-| **OrderWizard** | 3-step wizard: select products from a custom autocomplete dropdown, review order, then confirm. Cart is stored in Session and persists across page loads. |
-| **OrderHistory** | Paginated list using `GetPaged(skip, take)` with a shared `OrdersTable` repeater. Shows all orders including deleted ones (visually dimmed). |
-| **OrdersManage** | Full GridView with inline edit, status filter, sort, and soft-delete. Deletion requires a confirm dialog and blocks delivered orders via a two-layer guard (disabled button + server re-check). |
+| **OrderWizard** | 3-step wizard: select products via autocomplete, review, confirm. Cart stored in session. |
+| **OrderHistory** | Paginated list via `GetPaged(skip, take)`. Shows all orders including soft-deleted (visually dimmed). |
+| **OrdersManage** | Full GridView with inline edit, status filter, sort, soft-delete. Confirm dialog + server re-check guard. |
 
-**Event flow:**
+## Hosting
 
-- **OrderPlaced** → rebinds all three controls (wizard needs fresh stock, history and manage need the new order).
-- **OrderDeleted** → rebinds only history (manage already rebinds itself internally; the wizard is intentionally left stale and self-corrects on the next full page load or order placement).
+`Program.cs` replaces IIS hosting with Kestrel:
 
-## Service Layer
-
-### ProductService
-
-Full CRUD operations delegated to `ProductRepository`. `Add` and `Update` validate models with `Validator.TryValidateObject` at the service boundary. `Update` enforces a one-way invariant: if `Stock` reaches zero, `IsActive` is forced to `false` regardless of what the caller sets.
-
-### OrderService
-
-Read methods delegate to `OrderRepository`. Write methods bypass the read-only repository entirely and open their own `AppDbContext` with a transaction.
-
-| Method | Transaction | Cross-entity touch |
-|--------|------------|-------------------|
-| `PlaceOrder` | Yes | Creates Order + OrderItems, decrements Product stock |
-| `UpdateStatus` | No | Sets Status/Priority on an existing Order, validates via DataAnnotation regex |
-| `DeleteOrder` | Yes | Restores Product stock from OrderItems, auto-reactivates products where `Stock > 0` |
-
-`OrderRepository` is intentionally read-only because every order mutation also modifies Product entities, requiring cross-entity atomic transactions that a read-only repository cannot provide.
+- DB init and logging setup moved from `Global.asax.Application_Start` → after `builder.Build()`
+- Routes registered in `ApplicationStarted` callback (requires host to be running)
+- Browser opened via `Process.Start` inside `ApplicationStarted` — fires only after routes are registered
+- Middleware order: `UseRouting` → `UseSession` → `UseSystemWebAdapters` → `MapHttpHandlers` → `MapScriptManager`
 
 ## Data Model
 
@@ -145,44 +133,33 @@ classDiagram
 
 Notable storage details:
 
-- `Product.IsActive` and `Product.IsDeleted` use `HasConversion<int>()` because SQLite has no native boolean type (stored as 0/1).
-- `Order.Extras` is `List<string>` persisted as a pipe-delimited string. The pipe character is chosen over comma because commas in extra values (e.g., "Express delivery, priority") would silently corrupt the data on roundtrip.
-- `OrderItem` is marked `[Serializable]` to support StateServer or SQLServer session modes if the app is ever migrated.
-- No concurrency tokens (`RowVersion`) are configured because SQLite's EF Core provider silently ignores them.
+- `Product.IsActive` and `Product.IsDeleted` use `HasConversion<bool, int>()` (EF Core 9 ValueConverter syntax) — SQLite has no native boolean type.
+- `Order.Extras` is `List<string>` persisted as a pipe-delimited string.
+- No concurrency tokens — SQLite EF Core provider silently ignores them.
 
-## Key Decisions
+## Key Migration Changes
 
-| Decision | Rationale |
-|----------|-----------|
-| Manual DI, no framework | WebForms pages/controls are created by reflection, so constructor injection is not possible. Adding a framework would only add property injection boilerplate. |
-| Repositories are pure CRUD | Business logic lives in the service layer, keeping repos simple and focused on data access. |
-| OrderRepository is read-only | Order mutations always span Order + Product entities and require transactions, so writes bypass the repo. |
-| Extras delimiter is pipe (`\|`) | Commas in extra values would silently split into multiple entries when the string is round-tripped. |
-| `\A`/`\z` regex anchors | Standard `^`/`$` anchors match line boundaries, not string boundaries, which could allow multi-line bypass in regex validators. |
-| File logging in code, not web.config | `TextWriterTraceListener` resolves relative paths against the IIS Express install directory, not the app root. |
-| `ViewStateUserKey = SessionID` | Folds the session ID into the ViewState HMAC, rejecting postbacks from a different session as a CSRF defense. |
-
-## Build and Run
-
-```bash
-dotnet build LegacyWebForms\LegacyWebForms.csproj
-```
-
-IIS Express may lock the output DLL during builds. If you get a file-lock error, stop IIS Express first:
-
-```powershell
-Stop-Process -Name iisexpress
-```
+| Area | Legacy | CoreWebForms |
+|------|--------|-------------|
+| Hosting | IIS Express / IIS | Kestrel (`Program.cs`) |
+| Session | In-process | Distributed memory cache + JSON serializer |
+| ASPX compilation | Pre-compiled by MSBuild | Runtime Roslyn via `EnableRuntimeAspxCompilation` |
+| Routing | `web.config` defaultDocument | `RouteTable.Routes.MapPageRoute` in `ApplicationStarted` |
+| Static files | IIS native | `UseStaticFiles` per directory |
+| `Bind()` in ASPX | Supported | Not supported — replaced with `Eval()` + `FindControl()` |
+| `UpdatePanel` | Supported | Not supported — removed, full postback |
+| `CustomValidator` | Supported | Not supported — replaced with Label + manual validation |
 
 ## Detailed Documentation
 
-Full implementation documentation with diagrams, code walkthroughs, and API references lives in `docs/`:
-
 | Document | Covers |
 |----------|--------|
-| [index.md](docs/index.md) | Architecture diagrams, layer call flow, component interaction, startup flow, quick reference table |
-| [core.md](docs/core.md) | Core layer interfaces, AppConstants, AppPage, ILogger/AppLogger, Global.asax startup, AppData composition root, ServiceContainer, ProductService, OrderService |
-| [data.md](docs/data.md) | AppDbContext configuration, context lifetime patterns, ProductRepository CRUD, OrderRepository queries, DbSeeder, all models, SQLite schema DDL |
-| [pages.md](docs/pages.md) | Page lifecycle, Site.Master nav, Dashboard single-fetch, Products inline edit + filters, Orders coordinator + wizard + history + manage, shared controls |
-| [frontend.md](docs/frontend.md) | combo.js autocomplete state machine, site.js confirm dialog flow, UiHelper status badges, GridViewHelper sort arrows, UpdatePanel regions, badge CSS classes |
-| [config.md](docs/config.md) | web.config settings, .csproj build config, ErrorPage.aspx, security model, deployment checklist |
+| [docs/migration/00-index.md](docs/migration/00-index.md) | Migration overview and phase index |
+| [docs/migration/01-project-setup.md](docs/migration/01-project-setup.md) | csproj → CoreWebForms.Sdk, namespace rename |
+| [docs/migration/02-hosting.md](docs/migration/02-hosting.md) | Program.cs, Global.asax, VS Code launch config |
+| [docs/migration/03-data-layer.md](docs/migration/03-data-layer.md) | EF Core 9 upgrade, ValueConverter changes |
+| [docs/migration/04-session.md](docs/migration/04-session.md) | Distributed session setup, JSON serializer |
+| [docs/migration/05-aspx-pages.md](docs/migration/05-aspx-pages.md) | Bind→Eval, UpdatePanel removal, CustomValidator replacement |
+| [docs/migration/06-static-files-routing.md](docs/migration/06-static-files-routing.md) | Static files, URL routing, middleware pipeline |
+| [docs/migration/07-net10-migration-blocked.md](docs/migration/07-net10-migration-blocked.md) | Why .NET 10 migration is not yet possible |
+| [docs/implementation/](docs/implementation/) | Full implementation docs (inherited from LegacyWebForms) |

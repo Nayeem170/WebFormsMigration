@@ -1,4 +1,4 @@
-namespace LegacyWebForms
+namespace CoreWebForms
 {
     public partial class ProductsPage
     {

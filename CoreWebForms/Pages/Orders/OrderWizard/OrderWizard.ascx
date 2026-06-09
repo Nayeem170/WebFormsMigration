@@ -1,4 +1,4 @@
-<%@ Control Language="C#" AutoEventWireup="true" CodeBehind="OrderWizard.ascx.cs" Inherits="LegacyWebForms.OrderWizardControl" %>
+<%@ Control Language="C#" AutoEventWireup="true" CodeBehind="OrderWizard.ascx.cs" Inherits="CoreWebForms.OrderWizardControl" %>
 <script src='<%= ResolveUrl("./combo.js") %>' type="text/javascript"></script>
 
 <div class="card card-pad">
@@ -111,34 +111,25 @@
 
                 <hr class="divider" />
 
-                <asp:UpdatePanel ID="upCalendar" runat="server" UpdateMode="Conditional">
-                <ContentTemplate>
-                    <div class="form-section-hdr">Delivery Date</div>
-                    <div style="margin-bottom:6px">
-                        <asp:LinkButton ID="btnCalToday" runat="server" CssClass="btn btn-secondary"
-                            style="font-size:11px;padding:3px 10px" OnClick="btnCalToday_Click"
-                            CausesValidation="false">Today</asp:LinkButton>
-                    </div>
-                    <div class="calendar-wrap">
-                        <asp:Calendar ID="calDelivery" runat="server"
-                            SelectionMode="Day"
-                            Font-Size="12px"
-                            TodayDayStyle-Font-Bold="true"
-                            SelectedDayStyle-BackColor="#1e3a5f"
-                            SelectedDayStyle-ForeColor="white"
-                            NextPrevStyle-ForeColor="#1e3a5f"
-                            TitleStyle-BackColor="#f0f2f5"
-                            TitleStyle-Font-Bold="true" />
-                    </div>
-                    <asp:CustomValidator ID="cvDate" runat="server"
-                        ValidationGroup="Step1" CssClass="err"
-                        ErrorMessage="Please select a delivery date (today or later)."
-                        OnServerValidate="cvDate_ServerValidate" Display="Dynamic">!</asp:CustomValidator>
-                </ContentTemplate>
-                <Triggers>
-                    <asp:AsyncPostBackTrigger ControlID="btnCalToday" EventName="Click" />
-                </Triggers>
-                </asp:UpdatePanel>
+                <div class="form-section-hdr">Delivery Date</div>
+                <div style="margin-bottom:6px">
+                    <asp:LinkButton ID="btnCalToday" runat="server" CssClass="btn btn-secondary"
+                        style="font-size:11px;padding:3px 10px" OnClick="btnCalToday_Click"
+                        CausesValidation="false">Today</asp:LinkButton>
+                </div>
+                <div class="calendar-wrap">
+                    <asp:Calendar ID="calDelivery" runat="server"
+                        SelectionMode="Day"
+                        Font-Size="12px"
+                        TodayDayStyle-Font-Bold="true"
+                        SelectedDayStyle-BackColor="#1e3a5f"
+                        SelectedDayStyle-ForeColor="white"
+                        NextPrevStyle-ForeColor="#1e3a5f"
+                        TitleStyle-BackColor="#f0f2f5"
+                        TitleStyle-Font-Bold="true" />
+                </div>
+                <asp:Label ID="lblDateError" runat="server" CssClass="err"
+                    Text="Please select a delivery date (today or later)." Visible="false" />
 
                 <div style="display:flex;justify-content:flex-end;margin-top:8px">
                     <asp:Button ID="btnNext" runat="server" Text="Next &rarr;"

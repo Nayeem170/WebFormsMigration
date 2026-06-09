@@ -4,7 +4,7 @@ using System.Linq;
 using System.Web.UI;
 using System.Web.UI.WebControls;
 
-namespace LegacyWebForms
+namespace CoreWebForms
 {
     public partial class OrderWizardControl : UserControl
     {
@@ -58,7 +58,6 @@ namespace LegacyWebForms
         {
             calDelivery.SelectedDate = DateTime.Today;
             calDelivery.VisibleDate = DateTime.Today;
-            upCalendar.Update();
         }
 
         protected void btnAddItem_Click(object sender, EventArgs e)
@@ -110,6 +109,12 @@ namespace LegacyWebForms
         protected void btnNext_Click(object sender, EventArgs e)
         {
             if (!Page.IsValid) return;
+            if (calDelivery.SelectedDate == DateTime.MinValue || calDelivery.SelectedDate < DateTime.Today)
+            {
+                lblDateError.Visible = true;
+                return;
+            }
+            lblDateError.Visible = false;
             if (CartItems.Count == 0)
             {
                 lblCartWarning.Text = "Add at least one product before continuing.";
@@ -224,11 +229,6 @@ namespace LegacyWebForms
             BindCartItems();
             BindProductDropDown();
             SetStep(0);
-        }
-
-        protected void cvDate_ServerValidate(object source, ServerValidateEventArgs args)
-        {
-            args.IsValid = calDelivery.SelectedDate != DateTime.MinValue && calDelivery.SelectedDate >= DateTime.Today;
         }
 
         private List<string> SelectedExtras()

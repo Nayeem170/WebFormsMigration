@@ -1,4 +1,4 @@
-<%@ Page Title="Products" Language="C#" MasterPageFile="~/Layout/Site.Master" AutoEventWireup="true" CodeBehind="Products.aspx.cs" Inherits="LegacyWebForms.ProductsPage" %>
+<%@ Page Title="Products" Language="C#" MasterPageFile="~/Layout/Site.Master" AutoEventWireup="true" CodeBehind="Products.aspx.cs" Inherits="CoreWebForms.ProductsPage" %>
 <%@ Register TagPrefix="uc" TagName="PageHeader"      Src="~/Pages/Shared/PageHeader/PageHeader.ascx"  %>
 <%@ Register TagPrefix="uc" TagName="ProductSummary"  Src="ProductSummary/ProductSummary.ascx"  %>
 <%@ Register TagPrefix="uc" TagName="AddProductPanel"  Src="AddProductPanel/AddProductPanel.ascx"  %>
@@ -64,35 +64,35 @@
                 <asp:TemplateField HeaderText="Name" SortExpression="Name">
                     <ItemTemplate><%#: Eval("Name") %></ItemTemplate>
                     <EditItemTemplate>
-                        <asp:TextBox ID="txtEditName" runat="server" Text='<%# Bind("Name") %>' Width="160px" MaxLength="200" />
+                        <asp:TextBox ID="txtEditName" runat="server" Text='<%# Eval("Name") %>' Width="160px" MaxLength="200" />
                     </EditItemTemplate>
                 </asp:TemplateField>
 
                 <asp:TemplateField HeaderText="Category" SortExpression="Category">
                     <ItemTemplate><%#: Eval("Category") %></ItemTemplate>
                     <EditItemTemplate>
-                        <asp:DropDownList ID="ddlEditCategory" runat="server" SelectedValue='<%# Bind("Category") %>' />
+                        <asp:DropDownList ID="ddlEditCategory" runat="server" SelectedValue='<%# Eval("Category") %>' />
                     </EditItemTemplate>
                 </asp:TemplateField>
 
                 <asp:TemplateField HeaderText="Price" SortExpression="Price" ItemStyle-Width="80px">
                     <ItemTemplate>$<%#: Eval("Price", "{0:F2}") %></ItemTemplate>
                     <EditItemTemplate>
-                        <asp:TextBox ID="txtEditPrice" runat="server" Text='<%# Bind("Price") %>' Width="70px" MaxLength="10" />
+                        <asp:TextBox ID="txtEditPrice" runat="server" Text='<%# Eval("Price") %>' Width="70px" MaxLength="10" />
                     </EditItemTemplate>
                 </asp:TemplateField>
 
                 <asp:TemplateField HeaderText="Stock" SortExpression="Stock" ItemStyle-Width="65px">
                     <ItemTemplate><%#: Eval("Stock") %></ItemTemplate>
                     <EditItemTemplate>
-                        <asp:TextBox ID="txtEditStock" runat="server" Text='<%# Bind("Stock") %>' Width="55px" MaxLength="7" />
+                        <asp:TextBox ID="txtEditStock" runat="server" Text='<%# Eval("Stock") %>' Width="55px" MaxLength="7" />
                     </EditItemTemplate>
                 </asp:TemplateField>
 
                 <asp:TemplateField HeaderText="Status" ItemStyle-Width="80px">
                     <ItemTemplate><%# GetStatusHtml(Container.DataItem) %></ItemTemplate>
                     <EditItemTemplate>
-                        <asp:CheckBox ID="chkEditActive" runat="server" Checked='<%# Bind("IsActive") %>' />
+                        <asp:CheckBox ID="chkEditActive" runat="server" Checked='<%# (bool)Eval("IsActive") %>' />
                     </EditItemTemplate>
                 </asp:TemplateField>
 
