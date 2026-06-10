@@ -154,12 +154,12 @@ Notable storage details:
 
 | Document | Covers |
 |----------|--------|
-| [docs/migration/00-index.md](docs/migration/00-index.md) | Migration overview and phase index |
-| [docs/migration/01-project-setup.md](docs/migration/01-project-setup.md) | csproj → CoreWebForms.Sdk, namespace rename |
-| [docs/migration/02-hosting.md](docs/migration/02-hosting.md) | Program.cs, Global.asax, VS Code launch config |
-| [docs/migration/03-data-layer.md](docs/migration/03-data-layer.md) | EF Core 9 upgrade, ValueConverter changes |
-| [docs/migration/04-session.md](docs/migration/04-session.md) | Distributed session setup, JSON serializer |
-| [docs/migration/05-aspx-pages.md](docs/migration/05-aspx-pages.md) | Bind→Eval, UpdatePanel removal, CustomValidator replacement |
-| [docs/migration/06-static-files-routing.md](docs/migration/06-static-files-routing.md) | Static files, URL routing, middleware pipeline |
-| [docs/migration/07-net10-migration-blocked.md](docs/migration/07-net10-migration-blocked.md) | Why .NET 10 migration is not yet possible |
-| [docs/implementation/](docs/implementation/) | Full implementation docs (inherited from LegacyWebForms) |
+| [../docs/migration/00-index.md](../docs/migration/00-index.md) | Migration overview and phase index |
+| [../docs/migration/01-project-setup.md](../docs/migration/01-project-setup.md) | csproj → CoreWebForms.Sdk, namespace rename |
+| [../docs/migration/02-hosting.md](../docs/migration/02-hosting.md) | Program.cs, Global.asax, VS Code launch config |
+| [../docs/migration/03-data-layer.md](../docs/migration/03-data-layer.md) | EF Core 9 upgrade, ValueConverter changes |
+| [../docs/migration/04-session.md](../docs/migration/04-session.md) | Distributed session setup, JSON serializer |
+| [../docs/migration/05-aspx-pages.md](../docs/migration/05-aspx-pages.md) | Bind→Eval, UpdatePanel removal, CustomValidator replacement |
+| [../docs/migration/06-static-files-routing.md](../docs/migration/06-static-files-routing.md) | Static files, URL routing, middleware pipeline |
+| [../docs/migration/07-net10-migration-blocked.md](../docs/migration/07-net10-migration-blocked.md) | Why .NET 10 migration is not yet possible |
+| [../docs/implementation/](../docs/implementation/) | Full implementation docs |
