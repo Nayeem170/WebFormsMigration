@@ -176,13 +176,17 @@ Stop-Process -Name iisexpress
 
 ## Detailed Documentation
 
-Full implementation documentation with diagrams, code walkthroughs, and API references lives in `docs/`:
+Full implementation documentation with diagrams, code walkthroughs, and API references lives in `../docs/implementation/`:
 
 | Document | Covers |
 |----------|--------|
-| [index.md](docs/index.md) | Architecture diagrams, layer call flow, component interaction, startup flow, quick reference table |
-| [core.md](docs/core.md) | Core layer interfaces, AppConstants, AppPage, ILogger/AppLogger, Global.asax startup, AppData composition root, ServiceContainer, ProductService, OrderService |
-| [data.md](docs/data.md) | AppDbContext configuration, context lifetime patterns, ProductRepository CRUD, OrderRepository queries, DbSeeder, all models, SQLite schema DDL |
-| [pages.md](docs/pages.md) | Page lifecycle, Site.Master nav, Dashboard single-fetch, Products inline edit + filters, Orders coordinator + wizard + history + manage, shared controls |
-| [frontend.md](docs/frontend.md) | combo.js autocomplete state machine, site.js confirm dialog flow, UiHelper status badges, GridViewHelper sort arrows, UpdatePanel regions, badge CSS classes |
-| [config.md](docs/config.md) | web.config settings, .csproj build config, ErrorPage.aspx, security model, deployment checklist |
+| [00-index.md](../docs/implementation/00-index.md) | Architecture diagrams, layer call flow, component interaction, startup flow, quick reference table |
+| [01-core.md](../docs/implementation/01-core.md) | Core layer interfaces, AppConstants, AppPage, ILogger/AppLogger, Global.asax startup, AppData composition root, ServiceContainer, ProductService, OrderService |
+| [02-data.md](../docs/implementation/02-data.md) | AppDbContext configuration, context lifetime patterns, ProductRepository CRUD, OrderRepository queries, DbSeeder, all models, SQLite schema DDL |
+| [03-pages.md](../docs/implementation/03-pages.md) | Page lifecycle, Site.Master nav, Dashboard single-fetch, Products inline edit + filters, Orders coordinator + wizard + history + manage, shared controls |
+| [04-frontend.md](../docs/implementation/04-frontend.md) | combo.js autocomplete state machine, site.js confirm dialog flow, UiHelper status badges, GridViewHelper sort arrows, UpdatePanel regions, badge CSS classes |
+| [05-config.md](../docs/implementation/05-config.md) | web.config settings, .csproj build config, ErrorPage.aspx, security model, deployment checklist |
+
+## Migration
+
+This project has been migrated to ASP.NET Core using `CoreWebForms.Sdk`. See the migrated project at `../CoreWebForms/` and the step-by-step migration guide in `../docs/migration/`.
