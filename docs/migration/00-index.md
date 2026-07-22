@@ -18,8 +18,10 @@ This guide is based on the actual migration of the **LegacyWebForms** inventory 
 | Target | `net48` | `net9.0` |
 | Hosting | IIS / IIS Express | Kestrel (self-hosted) |
 | EF Core | 3.1.32 | 9.0.17 |
+| DB schema | `EnsureCreated()` | EF Core migrations (`Migrate()`) |
 | Session | In-process | Distributed (MemoryCache) + JSON serializer |
 | Startup | `Global.asax.cs Application_Start` | `Program.cs Main()` |
+| Configuration | Hardcoded in code | `appsettings.json` + env override |
 | Data binding | `Bind()` (two-way) | Typed `Container.DataItem` cast (one-way) |
 | UpdatePanel | Supported | Unsupported (full postback) |
 | CustomValidator | Supported | Unsupported (manual validation) |

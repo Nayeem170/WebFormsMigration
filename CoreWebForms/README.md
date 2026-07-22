@@ -146,6 +146,8 @@ Notable storage details:
 | ASPX compilation | Pre-compiled by MSBuild | Runtime Roslyn via `EnableRuntimeAspxCompilation` |
 | Routing | `web.config` defaultDocument | `RouteTable.Routes.MapPageRoute` in `ApplicationStarted` |
 | Static files | IIS native | `UseStaticFiles` per directory |
+| Configuration | Hardcoded in code | `appsettings.json` + `IConfiguration` (env-overridable) |
+| DB schema | `EnsureCreated()` | EF Core migrations (`Migrate()`) |
 | `Bind()` in ASPX | Supported | Not supported — replaced with typed `Container.DataItem` cast + `FindControl()` |
 | `UpdatePanel` | Supported | Not supported — removed, full postback |
 | `CustomValidator` | Supported | Not supported — replaced with Label + manual validation |

@@ -29,7 +29,8 @@ namespace CoreWebForms
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            builder.WebHost.UseUrls("http://localhost:8081");
+            var urls = builder.Configuration["Urls"] ?? "http://localhost:8081";
+            builder.WebHost.UseUrls(urls);
 
             builder.Services.AddDataProtection();
             builder.Services.AddDistributedMemoryCache();
@@ -51,8 +52,9 @@ namespace CoreWebForms
 
             var contentRoot = app.Environment.ContentRootPath;
 
-            // DB init (moved from Global.asax Application_Start)
-            var dbPath = Path.Combine(contentRoot, "App_Data", "inventory.db");
+            // DB init (moved from Global.asax Application_Start) — path from appsettings.json
+            var dbRelativePath = builder.Configuration["Database:RelativePath"] ?? "App_Data/inventory.db";
+            var dbPath = Path.Combine(contentRoot, dbRelativePath);
             AppData.Initialize(dbPath);
 
             // Logging setup (moved from Global.asax)
@@ -104,7 +106,7 @@ namespace CoreWebForms
                     RouteTable.Routes.MapPageRoute("Orders", "Pages/Orders/", "~/Pages/Orders/Orders.aspx");
 
                     if (app.Environment.IsDevelopment())
-                        Process.Start(new ProcessStartInfo("http://localhost:8081/") { UseShellExecute = true });
+                        Process.Start(new ProcessStartInfo(urls.Split(';')[0]) { UseShellExecute = true });
                 });
 
             app.MapHttpHandlers();
@@ -121,6 +123,15 @@ namespace CoreWebForms
 - Routes are registered in `ApplicationStarted` callback — `RouteTable` requires the host to be running
 - Middleware order: `UseRouting()` → `UseSession()` → `UseSystemWebAdapters()` → `MapHttpHandlers()` → `MapScriptManager()`
 - `AddHttpApplication<InventoryApp>()` hooks the `Global.asax.cs` class into the pipeline
+- `Urls` and `Database:RelativePath` are read from `IConfiguration` (`appsettings.json`) with code defaults as fallback; both are overridable via environment variables (`DOTNET_`/`ASPNETCORE_` prefixes)
+
+**`appsettings.json`** (project root — loaded by the default host config):
+```json
+{
+  "Urls": "http://localhost:8081",
+  "Database": { "RelativePath": "App_Data/inventory.db" }
+}
+```
 
 ### 2. Simplify Global.asax.cs
 
