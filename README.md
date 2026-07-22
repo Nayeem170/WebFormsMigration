@@ -15,7 +15,7 @@ ASP.NET Web Forms 4.8 to .NET 9 migration using [CoreWebForms](https://github.co
 1. **Project setup** — CoreWebForms.Sdk (net9.0), namespace rename
 2. **ASP.NET Core hosting** — Program.cs, Kestrel, Global.asax simplification
 3. **Data layer** — EF Core 9 ValueConverter compatibility fix
-4. **ASPX pages** — Replace Bind() with Eval(), remove unsupported controls
+4. **ASPX pages** — Replace Bind() with typed Container.DataItem binding, remove unsupported controls
 5. **Session** — Distributed session with JSON serializer
 6. **Static files & routing** — UseStaticFiles, MapPageRoute, middleware pipeline
 

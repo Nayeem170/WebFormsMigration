@@ -282,7 +282,7 @@ graph LR
     end
 
     subgraph Fix["Replacement"]
-        B --> B2["Eval() + FindControl()\nin RowUpdating handler"]
+        B --> B2["Container.DataItem cast\n+ FindControl() in RowUpdating"]
         U --> U2["Remove wrapper\nfull postback\nJS graceful degradation guard"]
         C --> C2["Label + Visible=false\nmanual validation in button handler"]
     end
@@ -291,7 +291,7 @@ graph LR
     style Fix fill:#e8f5e9,stroke:#2e7d32
 ```
 
-> "`Bind()` is WebForms two-way data binding — it wires a GridView edit row back to the data source automatically. The runtime ASPX compiler doesn't implement the code generation for it. It compiles but throws at runtime during data binding. The fix is switching to `Eval()` for one-way display and extracting edited values manually in the code-behind via `FindControl()`. The code-behind was already doing that anyway, so the change was small.
+> "`Bind()` is WebForms two-way data binding — it wires a GridView edit row back to the data source automatically. The runtime ASPX compiler doesn't implement the code generation for it. It compiles but throws at runtime during data binding. The fix is casting `Container.DataItem` to the model type for one-way display — reflection-free and type-safe, unlike `Eval()` — and extracting edited values manually in the code-behind via `FindControl()`. The code-behind was already doing that anyway, so the change was small.
 >
 > `UpdatePanel` and `AsyncPostBackTrigger` — partial-page postbacks via `ScriptManager` — aren't supported. We stripped them out and let those controls fall back to full-page postbacks. We kept a JavaScript guard so that any code using the AJAX `PageRequestManager` only runs if the runtime actually exists:
 

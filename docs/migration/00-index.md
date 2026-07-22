@@ -20,7 +20,7 @@ This guide is based on the actual migration of the **LegacyWebForms** inventory 
 | EF Core | 3.1.32 | 9.0.17 |
 | Session | In-process | Distributed (MemoryCache) + JSON serializer |
 | Startup | `Global.asax.cs Application_Start` | `Program.cs Main()` |
-| Data binding | `Bind()` (two-way) | `Eval()` (one-way) |
+| Data binding | `Bind()` (two-way) | Typed `Container.DataItem` cast (one-way) |
 | UpdatePanel | Supported | Unsupported (full postback) |
 | CustomValidator | Supported | Unsupported (manual validation) |
 
@@ -32,7 +32,7 @@ This guide is based on the actual migration of the **LegacyWebForms** inventory 
 | 2 | ASP.NET Core hosting — Program.cs, Global.asax.cs, launchSettings | [Phase 2](02-hosting.md) |
 | 3 | Data layer — EF Core upgrade, AppDbContext, AppData | [Phase 3](03-data-layer.md) |
 | 4 | Session — distributed session, JSON serializer | [Phase 4](04-session.md) |
-| 5 | ASPX pages — Bind to Eval, remove unsupported controls | [Phase 5](05-aspx-pages.md) |
+| 5 | ASPX pages — Bind to typed Container.DataItem cast, remove unsupported controls | [Phase 5](05-aspx-pages.md) |
 | 6 | Static files, routing, middleware pipeline | [Phase 6](06-static-files-routing.md) |
 
 ## Prerequisites
@@ -52,7 +52,7 @@ The migration consists of 4 phase-aligned commits on `feature/corewebforms-migra
 
 ## Key Blockers Encountered
 
-- **`Bind()` not supported** in CoreWebForms SDK runtime ASPX compiler — replace with `Eval()`
+- **`Bind()` not supported** in CoreWebForms SDK runtime ASPX compiler — replace with typed `Container.DataItem` cast
 - **`UpdatePanel` / `AsyncPostBackTrigger` not supported** — unwrap to full postback
 - **`CustomValidator` not supported** — replace with Label + manual validation
 - **EF Core 9 removed implicit lambda converters** — use explicit `ValueConverter<,>`
