@@ -18,10 +18,10 @@ namespace CoreWebForms.Data
             }
         }
 
-        public Product GetById(int id)
+        public Product? GetById(int id)
         {
             using (var db = AppData.CreateDbContext())
-                return db.Products.AsNoTracking().FirstOrDefault(p => p.Id == id)!;
+                return db.Products.AsNoTracking().FirstOrDefault(p => p.Id == id);
         }
 
         public int Add(Product p)

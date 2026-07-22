@@ -23,7 +23,7 @@ namespace CoreWebForms.Services
             return _repo.GetAll(includeDeleted);
         }
 
-        public Product GetById(int id)
+        public Product? GetById(int id)
         {
             return _repo.GetById(id);
         }

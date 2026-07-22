@@ -29,7 +29,7 @@ namespace CoreWebForms.Services
             return _repo.GetAll(includeDeleted, status);
         }
 
-        public Order GetById(int id)
+        public Order? GetById(int id)
         {
             return _repo.GetById(id);
         }
