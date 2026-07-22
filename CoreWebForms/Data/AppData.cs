@@ -44,7 +44,7 @@ namespace CoreWebForms
         private static void EnsureDatabase(string dbPath)
         {
             using var db = new AppDbContext(dbPath);
-            db.Database.EnsureCreated();
+            db.Database.Migrate();
 
             if (!db.Products.Any())
                 new DbSeeder(db).Seed();
