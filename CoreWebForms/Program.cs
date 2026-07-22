@@ -16,7 +16,8 @@ namespace CoreWebForms
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            builder.WebHost.UseUrls("http://localhost:8081");
+            var urls = builder.Configuration["Urls"] ?? "http://localhost:8081";
+            builder.WebHost.UseUrls(urls);
 
             builder.Services.AddDataProtection();
             builder.Services.AddDistributedMemoryCache();
@@ -38,7 +39,8 @@ namespace CoreWebForms
 
             var contentRoot = app.Environment.ContentRootPath;
 
-            var dbPath = Path.Combine(contentRoot, "App_Data", "inventory.db");
+            var dbRelativePath = builder.Configuration["Database:RelativePath"] ?? "App_Data/inventory.db";
+            var dbPath = Path.Combine(contentRoot, dbRelativePath);
             AppData.Initialize(dbPath);
 
             var logDir = Path.Combine(contentRoot, "App_Data", "logs");
@@ -85,7 +87,7 @@ namespace CoreWebForms
                     RouteTable.Routes.MapPageRoute("Orders", "Pages/Orders/", "~/Pages/Orders/Orders.aspx");
 
                     if (app.Environment.IsDevelopment())
-                        Process.Start(new ProcessStartInfo("http://localhost:8081/") { UseShellExecute = true });
+                        Process.Start(new ProcessStartInfo(urls.Split(';')[0]) { UseShellExecute = true });
                 });
 
             app.MapHttpHandlers();
