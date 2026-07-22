@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
@@ -36,8 +37,10 @@ namespace CoreWebForms
                 e.HasKey(o => o.Id);
                 e.Property(o => o.Extras).HasConversion(
                     new ValueConverter<List<string>, string>(
-                        v => string.Join("|", v),
-                        v => (v == null || v.Length == 0) ? new List<string>() : v.Split(new[] { '|' }, StringSplitOptions.None).ToList()));
+                        v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                        v => string.IsNullOrEmpty(v)
+                            ? new List<string>()
+                            : JsonSerializer.Deserialize<List<string>>(v, (JsonSerializerOptions?)null) ?? new List<string>()));
                 e.Property(o => o.IsDeleted).HasConversion<int>();
                 e.HasMany(o => o.Items).WithOne().HasForeignKey(i => i.OrderId);
             });
