@@ -6,9 +6,9 @@ Fix ASPX markup for CoreWebForms SDK runtime compilation compatibility.
 
 ## Steps
 
-### 1. Replace Bind() with Eval()
+### 1. Replace Bind() with typed Container.DataItem casts
 
-The CoreWebForms SDK runtime ASPX compiler does not support `Bind()`. Replace all two-way binding expressions with one-way `Eval()`.
+The CoreWebForms SDK runtime ASPX compiler does not support `Bind()` (two-way binding). Replace those expressions with a strongly-typed cast of `Container.DataItem`, reading the property directly. This is preferred over `Eval()`: it skips per-cell runtime reflection and gives compile-time type safety (rename a property and the build fails instead of erroring at runtime). CoreWebForms has no two-way binding at all, so edited values must still be extracted manually in the code-behind (see the `RowUpdating` example below).
 
 **Before** (`Products.aspx`):
 ```aspx
@@ -19,13 +19,18 @@ The CoreWebForms SDK runtime ASPX compiler does not support `Bind()`. Replace al
 <asp:CheckBox ID="chkEditActive" runat="server" Checked='<%# Bind("IsActive") %>' />
 ```
 
-**After** (`Products.aspx`):
+**After** (`Products.aspx`) — cast `Container.DataItem` to the model type:
 ```aspx
-<asp:TextBox ID="txtEditName" runat="server" Text='<%# Eval("Name") %>' />
-<asp:DropDownList ID="ddlEditCategory" runat="server" SelectedValue='<%# Eval("Category") %>' />
-<asp:TextBox ID="txtEditPrice" runat="server" Text='<%# Eval("Price") %>' />
-<asp:TextBox ID="txtEditStock" runat="server" Text='<%# Eval("Stock") %>' />
-<asp:CheckBox ID="chkEditActive" runat="server" Checked='<%# (bool)Eval("IsActive") %>' />
+<asp:TextBox ID="txtEditName" runat="server" Text='<%# ((CoreWebForms.Product)Container.DataItem).Name %>' />
+<asp:DropDownList ID="ddlEditCategory" runat="server" SelectedValue='<%# ((CoreWebForms.Product)Container.DataItem).Category %>' />
+<asp:TextBox ID="txtEditPrice" runat="server" Text='<%# ((CoreWebForms.Product)Container.DataItem).Price %>' />
+<asp:TextBox ID="txtEditStock" runat="server" Text='<%# ((CoreWebForms.Product)Container.DataItem).Stock %>' />
+<asp:CheckBox ID="chkEditActive" runat="server" Checked='<%# ((CoreWebForms.Product)Container.DataItem).IsActive %>' />
+```
+
+Use the fully-qualified type (`CoreWebForms.Product`) so no `<%@ Import %>` directive is needed. For formatted display values, call `.ToString()` directly instead of `Eval(field, format)`:
+```aspx
+$<%#: ((CoreWebForms.Product)Container.DataItem).Price.ToString("F2") %>
 ```
 
 **Important**: Since `Bind()` is no longer used, values must be extracted manually from controls in the code-behind `RowUpdating` handler (which the existing code already does via `FindControl()`):
@@ -164,7 +169,7 @@ Remove legacy IIS-specific configuration. Keep only CoreWebForms-required settin
 
 | Feature | Status | Replacement |
 |---|---|---|
-| `Bind()` | Not supported | `Eval()` + manual `FindControl()` in code-behind |
+| `Bind()` | Not supported | Typed `Container.DataItem` cast + manual `FindControl()` in code-behind |
 | `UpdatePanel` | Not supported | Remove — full postback |
 | `AsyncPostBackTrigger` | Not supported | Remove |
 | `CustomValidator` (server-side) | Not supported | Label + manual validation |
@@ -178,6 +183,6 @@ dotnet run --project CoreWebForms.csproj
 ```
 
 - Browse to each page and verify rendering
-- Test edit/save operations (verify `Eval()` + `FindControl()` works)
+- Test edit/save operations (verify typed cast + `FindControl()` works)
 - Test postback-heavy pages (Calendar, Wizard)
 ```
