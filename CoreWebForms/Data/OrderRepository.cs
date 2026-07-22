@@ -30,10 +30,10 @@ namespace CoreWebForms.Data
             }
         }
 
-        public Order GetById(int id)
+        public Order? GetById(int id)
         {
             using (var db = AppData.CreateDbContext())
-                return db.Orders.Include(o => o.Items).AsNoTracking().FirstOrDefault(o => o.Id == id)!;
+                return db.Orders.Include(o => o.Items).AsNoTracking().FirstOrDefault(o => o.Id == id);
         }
 
         public int Count(bool includeDeleted = false)

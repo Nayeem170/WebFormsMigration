@@ -6,7 +6,7 @@ namespace CoreWebForms.Data
     {
         List<Order> GetAll(bool includeDeleted = false);
         List<Order> GetAll(bool includeDeleted, string? status);
-        Order GetById(int id);
+        Order? GetById(int id);
         int Count(bool includeDeleted = false);
         int Count(bool includeDeleted, string? status);
         int CountByStatus(string status);
