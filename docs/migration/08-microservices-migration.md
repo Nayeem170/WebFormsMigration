@@ -314,6 +314,16 @@ Exit criteria:
 - The copy is a packaging step, not a new behavior step.
 - The parity smoke suite runs only during Phase 5 and only after reseeding the shared database back to the same state.
 
+Phase 5 execution record (2026-09-13):
+
+- The copy needed two depth fixes before it could run, both the same class as the Phase 3 path bug: `Database:RelativePath` became `../../App_Data/inventory.db` (the inherited `../App_Data` resolves to `Microservices/App_Data` from the copy's location) and the Contracts `ProjectReference` became `..\Contracts\Contracts.csproj`. The copy otherwise landed verbatim, including the csproj name and namespaces, so parity tested an unmodified copy. Frontend build outputs go to `Microservices/artifacts` through the copied `Directory.Build.props`, which also avoids output collisions with the frozen tree.
+- Database path verified by file evidence, not by startup: the pre-strip copy ran once with both arms forced `InProcess` and `Database:Migrate=false`, served all pages from the repo-root seeded file, and a repo-wide scan found exactly one `inventory.db` and no `Microservices/App_Data`.
+- Ports: `CoreWebForms` moved to `8082` before the freeze; `Frontend` keeps `8081`. The stale port table (Catalog 8091 / Orders 8092) was corrected to the real values (8094 / 8095).
+- Parity protocol: reseed, full suite against `CoreWebForms` (8082), reseed, full suite against `Frontend` (8081), compare. `scripts/smoke-parity.ps1` asserts observable behavior only (page status codes, seeded fixture names on the home/products/orders pages, place/insufficient/delete-restore through the shared services, stock accounting 38 -> 35 -> 38, the pinned insufficient-stock message) and never prints autoincrement order ids or `AddedDate`, the two fields that are nondeterministic by construction. Two suite corrections came from real page behavior: the products page hides out-of-stock items, and the orders page renders deleted orders struck through with a `Deleted` badge rather than hiding them. Both runs produced byte-identical output.
+- Strip commit removed `AppDbContext`, both repositories and their interfaces, `DbSeeder`, the design-time factory, the migrations folder, and the in-process `ProductService`/`OrderService` from Frontend (-1049 lines), dropped all EF package references, and reduced `AppData` to an HTTP-only factory that throws on `Database:Migrate=true` or any `InProcess` mode. The same parity suite against the stripped Frontend reproduced suite A's output exactly.
+- Freeze: `CoreWebForms` is frozen as of `a85475f`'s parent state verified by a final full-suite run (identical output, recorded as the last known-good proof that the fallback tree works against the shared database) plus 21/21 on the in-process characterization suite. From Phase 6 on, changes land in Frontend only. `CoreWebForms` stays out of every solution file, as it is today; the freeze is structural, not conventional.
+- Operational note: building the monolith (or the test project, which references it) requires the 8082 instance to be stopped, because the running process locks the shared `artifacts/bin` output.
+
 ### Phase 6 - Physical database split
 
 Objective: separate the data files once both services are already stable.
