@@ -38,6 +38,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="Content\**\*;Scripts\**\*" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
