@@ -1,0 +1,9 @@
+bin/
+obj/
+.vs/
+App_Data/
+*.user
+.claude/
+CLAUDE.md
+graphify-out/
+../WebFormsSample/

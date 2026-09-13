@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>..\artifacts\obj\$(Configuration)\</BaseIntermediateOutputPath>
+    <OutputPath>..\artifacts\bin\$(Configuration)\net$(TargetFramework)\</OutputPath>
+  </PropertyGroup>
+</Project>

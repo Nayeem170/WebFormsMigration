@@ -1,0 +1,18 @@
+/* Two-column layout */
+.two-col { display: grid; grid-template-columns: 1fr 264px; gap: 14px; }
+
+/* Category expand */
+.cat-row { padding: 9px 16px; border-bottom: 1px solid #f5f4f1; display: flex; align-items: center; justify-content: space-between; }
+.cat-row:last-child { border-bottom: none; }
+.cat-row:hover { background: #faf9f6; }
+.cat-name { font-size: 13px; color: #3a3936; font-weight: 500; }
+.cat-right { display: flex; align-items: center; gap: 6px; }
+.cat-pill { font-size: 10px; background: #eeebe5; color: #6b6860; padding: 2px 7px; border-radius: 20px; font-family: 'DM Mono', monospace; }
+.cat-chev { font-size: 11px; color: #bbb; display: inline-block; transition: transform 0.2s; }
+.cat-chev.open { transform: rotate(90deg); }
+.cat-sub { background: #faf9f6; padding: 8px 16px 8px 26px; font-size: 12px; color: #6b6860; line-height: 1.9; border-bottom: 1px solid #edeae5; }
+
+/* Out-of-stock */
+.oos-row { display: flex; align-items: center; gap: 8px; padding: 9px 16px; border-bottom: 1px solid #f5f4f1; font-size: 13px; color: #3a3936; }
+.oos-row:last-child { border-bottom: none; }
+.oos-dot { width: 6px; height: 6px; border-radius: 50%; background: #e24040; flex-shrink: 0; }
