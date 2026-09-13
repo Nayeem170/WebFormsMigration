@@ -103,14 +103,13 @@ Steps:
 5. Add a config switch for in-process implementation versus HTTP client implementation.
 6. Update pages and controls to depend on interfaces instead of concrete services.
 7. Keep the implementations in-process for now.
-8. Keep the session payload stable while types are still shared.
+8. Keep the session payload stable; model types do not move in this plan.
 9. Use a shared, stateless `HttpClient` when the config switch selects HTTP; do not new one per page instance.
 
 Important note:
 
-- `OrderWizard` stores `List<OrderItem>` in session.
-- Moving `OrderItem` to a different assembly can break session deserialization if done carelessly.
-- The contract spike in the next phase must verify this before type moves land.
+- `OrderWizard` stores `List<OrderItem>` in session, and `Program.cs` registers `List<OrderItem>` under the `CartItems` key with the JSON session serializer.
+- Model types do not move to another assembly anywhere in this plan, so the session payload's registered type identity never changes and no compatibility window is needed.
 
 Exit criteria:
 
@@ -128,20 +127,29 @@ Steps:
 1. Create a contracts project with DTOs only.
 2. Spike `CoreWebForms.Sdk` referencing a plain `Microsoft.NET.Sdk` class library.
 3. Verify that the runtime ASPX compiler and the contracts project build together.
-4. Verify JSON session compatibility for any moved shared types.
+4. Keep `Product`, `Order`, and `OrderItem` out of Contracts; the contracts project stays DTO-only.
 5. Keep the contracts project free of business logic.
+
+Type ownership decision:
+
+- Contracts holds HTTP DTOs only. `Product`, `Order`, and `OrderItem` stay in the app and out of Contracts.
+- Each service keeps its own model classes internally and maps to DTOs at its HTTP boundary. Frontend seam implementations map DTOs back to the app's model types at the client boundary.
+- `Program.cs` registers `List<OrderItem>` under the `CartItems` session key; moving `OrderItem` changes the registered type identity and breaks existing session blobs.
+- Markup cost of moving types is small but not zero: only `Products.aspx` binds model types inline (9 typed `Container.DataItem` casts to `CoreWebForms.Product`). Keeping models in place means those casts compile with no changes. The other markup files use late-bound `Eval`, which does not reference types at compile time either way.
+- The models carry EF persistence concerns (`IsDeleted`, `AddedDate`) that do not belong on a wire contract.
+- If markup ever must reference a Contracts type, add `<%@ Assembly Name="..." %>` to that page per the Phase 0 spike result.
 
 Build concerns to prove early:
 
 - Project reference support must work under `CoreWebForms.Sdk`.
-- Session serialization must survive the planned type moves.
+- No shared model types move, so session serialization stays untouched.
 - The contracts assembly must not force a bigger refactor than needed.
 
 Exit criteria:
 
 - Contracts build cleanly.
 - The SDK reference spike passes.
-- Session behavior is still safe after any shared-type move.
+- The session payload is untouched because no shared types move.
 
 ### Phase 3 - Catalog service, shared DB, Catalog as sole writer
 
