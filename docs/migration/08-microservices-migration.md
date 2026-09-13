@@ -404,8 +404,8 @@ Use fixed localhost endpoints for the local stack.
 
 - `Frontend` -> `http://localhost:8081`
 - `CoreWebForms` -> `http://localhost:8082`
-- `Catalog` -> `http://localhost:8091`
-- `Orders` -> `http://localhost:8092`
+- `Catalog` -> `http://localhost:8094`
+- `Orders` -> `http://localhost:8095`
 
 Configure base URLs in `appsettings.Development.json` or environment variables.
 
