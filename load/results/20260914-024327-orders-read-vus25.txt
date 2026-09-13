@@ -1,0 +1,28 @@
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 13819   690.165465/s
+    checks_succeeded...: 100.00% 13819 out of 13819
+    checks_failed......: 0.00%   0 out of 13819
+
+    ✓ orders list 200
+
+    HTTP
+    http_req_duration..............: avg=36.1ms  min=5.95ms med=31.66ms max=615.66ms p(90)=38.79ms p(95)=43.15ms
+      { expected_response:true }...: avg=36.1ms  min=5.95ms med=31.66ms max=615.66ms p(90)=38.79ms p(95)=43.15ms
+    http_req_failed................: 0.00%  0 out of 13819
+    http_reqs......................: 13819  690.165465/s
+
+    EXECUTION
+    iteration_duration.............: avg=36.19ms min=5.95ms med=31.73ms max=615.66ms p(90)=38.85ms p(95)=43.23ms
+    iterations.....................: 13819  690.165465/s
+    vus............................: 25     min=25         max=25
+    vus_max........................: 25     min=25         max=25
+
+    NETWORK
+    data_received..................: 65 MB  3.2 MB/s
+    data_sent......................: 1.6 MB 80 kB/s
+
+
+

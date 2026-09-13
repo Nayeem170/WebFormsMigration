@@ -1,0 +1,28 @@
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 8248    409.116939/s
+    checks_succeeded...: 100.00% 8248 out of 8248
+    checks_failed......: 0.00%   0 out of 8248
+
+    ✓ catalog list 200
+
+    HTTP
+    http_req_duration..............: avg=121.82ms min=14.68ms med=71.95ms max=2.42s p(90)=150.35ms p(95)=279.35ms
+      { expected_response:true }...: avg=121.82ms min=14.68ms med=71.95ms max=2.42s p(90)=150.35ms p(95)=279.35ms
+    http_req_failed................: 0.00%  0 out of 8248
+    http_reqs......................: 8248   409.116939/s
+
+    EXECUTION
+    iteration_duration.............: avg=122.02ms min=15.28ms med=72.02ms max=2.42s p(90)=151.05ms p(95)=291.82ms
+    iterations.....................: 8248   409.116939/s
+    vus............................: 50     min=50        max=50
+    vus_max........................: 50     min=50        max=50
+
+    NETWORK
+    data_received..................: 17 MB  821 kB/s
+    data_sent......................: 850 kB 42 kB/s
+
+
+
