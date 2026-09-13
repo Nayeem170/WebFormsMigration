@@ -120,6 +120,37 @@ namespace CoreWebForms.CharacterizationTests
             return JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
         }
 
+        [Fact]
+        public async Task ConcurrentReserves_NeverOversell_AllSucceedAtLowN()
+        {
+            const int n = 8;
+            var product = await CreateProductAsync(stock: n, isActive: true);
+            var id = (int)product["id"]!;
+
+            var statuses = await Task.WhenAll(Enumerable.Range(0, n).Select(async i =>
+            {
+                var body = new JsonObject
+                {
+                    ["reservationKey"] = $"conc-{_run}-{i}",
+                    ["items"] = new JsonArray
+                    {
+                        new JsonObject { ["productId"] = id, ["quantity"] = 1 }
+                    }
+                };
+                var response = await Http.PostAsJsonAsync(CatalogBase + "/api/products/reserve", body);
+                return (int)response.StatusCode;
+            }));
+
+            var successes = statuses.Count(s => s == 200);
+            var reloaded = await GetProductAsync(id);
+            var stock = (int)reloaded!["stock"]!;
+
+            Assert.True(stock >= 0, $"oversell: stock {stock} after {successes} successes");
+            Assert.InRange(successes, 0, n);
+            Assert.Equal(n - successes, stock);
+            Assert.Equal(n, successes);
+        }
+
         public void Dispose()
         {
             foreach (var id in _createdProducts)

@@ -1,6 +1,7 @@
 # Scaling and Production Plan for the Inventory Stack
 
-Status: proposed. Not started. This plan picks up where
+Status: Phase 0 complete (2026-09-14; execution record in Phase 0). Phases 1+
+not started. This plan picks up where
 [08-microservices-migration.md](08-microservices-migration.md) ended: three
 services, two SQLite files, one UI tree, loopback only, no auth, every process
 started by hand. It answers three questions that the local plan deliberately
@@ -161,6 +162,42 @@ invariant green on SQLite, and the N-success goal recorded alongside the N
 where SQLite's busy timeout starts failing it.
 
 Rollback: none needed; measurement only.
+
+Phase 0 execution record (2026-09-14):
+
+- Tooling: k6 2.2.0 (binary at `artifacts/tools/k6/`, not committed),
+  `scripts/run-load.ps1` orchestrating `load/k6-scenarios.js`, and the
+  concurrent sweep in `scripts/test-concurrent-reserve.ps1`. Numbers and
+  raw summaries live in `load/` (`baseline.md`, `baseline-results.md`,
+  `concurrent-reserve.md`, `results/`). Stack: source-run, freshly
+  reseeded, closed-model constant-VUs, 20s per level.
+- Cold start: 3.4s to first 200 with warm OS caches; first-render request
+  durations of 10-13.3s observed in the same session's logs. ~13s is the
+  number later phases size probes against.
+- Read ceilings: dashboard (full path) saturates around 200 rps; products
+  page 570-650; direct catalog/orders list reads 410-690. Zero read
+  failures and zero degradation at 50 VUs. Throughput flattens or drops as
+  VUs rise on every scenario - per-request cost grows under contention, so
+  capacity claims name their concurrency level.
+- Write ceiling: ~10 req/s peak at 8 VUs (orders POST+DELETE), collapsing
+  to 5-6 req/s at 16-32 VUs with failures rising 0.5% -> 3.9% -> 10%.
+  Failure modes, all observed in service logs: `database is locked` 500s
+  stalling 6-15s (the 5s busy timeout plus queue); a `UNIQUE constraint
+  failed: ReservationKeys.Key` 500 where a committed-but-timed-out reserve
+  was retried with the same key - live evidence for Phase 2 step 2's
+  violation-to-replayed catch; and one 502 CatalogUnavailable from the
+  retry budget, the designed degradation.
+- Concurrent-reserve sweep: invariant PASS at every N from 8 to 256 (no
+  oversell, no negative stock, stock always exactly N minus successes).
+  Goal (exactly N of N) PASS through N=64, FAIL at N=128 (118/128) and
+  N=256 (235/256). SQLite's busy breaking point sits between 64 and 128
+  parallel reserves on this machine. The invariant is pinned permanently
+  by the `ConcurrentReserves_NeverOversell_AllSucceedAtLowN` fact (N=8);
+  suite 11/11, test-data cleanup verified.
+- One harness correction during the run: the k6 setup product initially
+  requested stock 1,000,000, which the DTO's `[Range(0, 999999)]` rejects
+  with 400; setup now uses the max. The first write-scenario rows were
+  discarded and re-run.
 
 ### Phase 1 - Shared session and key ring (Redis)
 
