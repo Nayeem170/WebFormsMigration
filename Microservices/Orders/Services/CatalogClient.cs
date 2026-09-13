@@ -20,7 +20,11 @@ namespace Orders
     public static class CatalogClient
     {
         private const int MaxAttempts = 3;
-        private static readonly HttpClient _client = new HttpClient();
+        private static readonly HttpClient _client = new HttpClient(
+            new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) }, disposeHandler: true)
+        {
+            Timeout = TimeSpan.FromSeconds(3)
+        };
         private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
 
         public static void Reserve(string baseUrl, ReserveStockRequest request)

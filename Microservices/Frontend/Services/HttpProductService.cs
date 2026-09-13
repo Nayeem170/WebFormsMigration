@@ -11,7 +11,6 @@ namespace CoreWebForms.Services
 {
     public class HttpProductService : IProductService
     {
-        private static readonly HttpClient _client = new HttpClient();
         private static readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         private readonly string _baseUrl;
         private readonly ILogger _log;
@@ -58,11 +57,7 @@ namespace CoreWebForms.Services
 
         private HttpResponseMessage Send(HttpMethod method, string path, object? body = null)
         {
-            using var request = new HttpRequestMessage(method, _baseUrl + path);
-            if (body != null)
-                request.Content = new StringContent(
-                    JsonSerializer.Serialize(body, _jsonOptions), Encoding.UTF8, "application/json");
-            var response = _client.Send(request);
+            var response = ServiceHttp.Send(() => BuildRequest(method, path, body), method == HttpMethod.Get);
             if (!response.IsSuccessStatusCode)
             {
                 var detail = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
@@ -73,6 +68,15 @@ namespace CoreWebForms.Services
                 throw new HttpRequestException(error);
             }
             return response;
+        }
+
+        private HttpRequestMessage BuildRequest(HttpMethod method, string path, object? body)
+        {
+            var request = new HttpRequestMessage(method, _baseUrl + path);
+            if (body != null)
+                request.Content = new StringContent(
+                    JsonSerializer.Serialize(body, _jsonOptions), Encoding.UTF8, "application/json");
+            return request;
         }
 
         private static T ReadJson<T>(HttpResponseMessage response)
