@@ -26,6 +26,16 @@ namespace CoreWebForms
         public void Bind()
         {
             BindProductDropDown();
+            if (SessionState.StoreUnavailable)
+            {
+                rptCart.DataSource = new List<OrderItem>();
+                rptCart.DataBind();
+                pnlCart.Visible = false;
+                litTotal.Text = "-";
+                lblCartWarning.Text = UiHelper.ServiceUnavailableMessage("Session store");
+                lblCartWarning.Visible = true;
+                return;
+            }
             BindCartItems();
             var def = DateTime.Today;
             calDelivery.SelectedDate = def;
@@ -53,7 +63,21 @@ namespace CoreWebForms
 
         private void BindCartItems()
         {
-            var items = CartItems;
+            List<OrderItem> items;
+            try
+            {
+                items = CartItems;
+            }
+            catch (Exception ex) when (ex is StackExchange.Redis.RedisException or NullReferenceException)
+            {
+                rptCart.DataSource = new List<OrderItem>();
+                rptCart.DataBind();
+                pnlCart.Visible = false;
+                litTotal.Text = "-";
+                lblCartWarning.Text = UiHelper.ServiceUnavailableMessage("Session store");
+                lblCartWarning.Visible = true;
+                return;
+            }
             rptCart.DataSource = items;
             rptCart.DataBind();
             pnlCart.Visible = items.Count > 0;
