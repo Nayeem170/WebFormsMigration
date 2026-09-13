@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Configuration;
 
 namespace CoreWebForms
 {
@@ -43,11 +44,13 @@ namespace CoreWebForms
             var dbPath = !string.IsNullOrEmpty(dbPathSetting)
                 ? dbPathSetting
                 : Path.Combine(contentRoot, builder.Configuration["Database:RelativePath"] ?? "App_Data/inventory.db");
-            var serviceMode = ServiceMode.InProcess;
-            var serviceModeText = builder.Configuration["Services:Mode"];
-            if (!string.IsNullOrEmpty(serviceModeText) && !Enum.TryParse<ServiceMode>(serviceModeText, ignoreCase: true, out serviceMode))
-                throw new InvalidOperationException(string.Format("Unknown Services:Mode value '{0}'.", serviceModeText));
-            AppData.Initialize(dbPath, serviceMode);
+            var productsModeText = builder.Configuration["Services:Products:Mode"];
+            var productsMode = ServiceMode.InProcess;
+            if (!string.IsNullOrEmpty(productsModeText) && !Enum.TryParse<ServiceMode>(productsModeText, ignoreCase: true, out productsMode))
+                throw new InvalidOperationException(string.Format("Unknown Services:Products:Mode value '{0}'.", productsModeText));
+            var productsBaseUrl = builder.Configuration["Services:Products:BaseUrl"];
+            var runMigrations = builder.Configuration.GetValue<bool?>("Database:Migrate") ?? true;
+            AppData.Initialize(dbPath, productsMode, productsBaseUrl, runMigrations);
 
             var logDir = Path.Combine(contentRoot, "App_Data", "logs");
             Directory.CreateDirectory(logDir);

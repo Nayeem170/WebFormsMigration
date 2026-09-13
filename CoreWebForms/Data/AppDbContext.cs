@@ -12,7 +12,7 @@ namespace CoreWebForms
 
         public AppDbContext(string dbPath)
         {
-            _connectionString = $"Data Source={dbPath}";
+            _connectionString = $"Data Source={dbPath};Default Timeout=5";
         }
 
         public DbSet<Product> Products { get; set; } = null!;

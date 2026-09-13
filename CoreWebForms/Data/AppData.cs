@@ -11,7 +11,8 @@ namespace CoreWebForms
 {
     public enum ServiceMode
     {
-        InProcess
+        InProcess,
+        Http
     }
 
     public static class AppData
@@ -21,7 +22,7 @@ namespace CoreWebForms
 
         public static ServiceContainer Services { get; private set; } = null!;
 
-        public static void Initialize(string dbPath, ServiceMode mode = ServiceMode.InProcess)
+        public static void Initialize(string dbPath, ServiceMode productsMode = ServiceMode.InProcess, string? productsBaseUrl = null, bool runMigrations = true)
         {
             DbPath = dbPath ?? throw new ArgumentNullException(nameof(dbPath));
             if (!_safeDbPath.IsMatch(DbPath))
@@ -31,19 +32,25 @@ namespace CoreWebForms
             if (!string.IsNullOrEmpty(dir))
                 Directory.CreateDirectory(dir);
 
-            EnsureDatabase(DbPath);
-            Services = CreateServices(mode);
+            if (runMigrations)
+                EnsureDatabase(DbPath);
+            Services = CreateServices(productsMode, productsBaseUrl);
         }
 
-        private static ServiceContainer CreateServices(ServiceMode mode)
+        private static ServiceContainer CreateServices(ServiceMode productsMode, string? productsBaseUrl)
         {
-            if (mode != ServiceMode.InProcess)
-                throw new NotSupportedException(string.Format("Service mode {0} is not implemented; the HTTP arm arrives in Phase 3.", mode));
-            return new ServiceContainer(
-                new ProductRepository(),
-                new OrderRepository(),
-                new AppLogger()
-            );
+            if (productsMode == ServiceMode.Http && string.IsNullOrEmpty(productsBaseUrl))
+                throw new ArgumentException("Services:Products:BaseUrl is required when Services:Products:Mode is Http.", nameof(productsBaseUrl));
+
+            var logger = new AppLogger();
+            var orders = new OrderService(new OrderRepository(), logger);
+            IProductService products = productsMode switch
+            {
+                ServiceMode.InProcess => new ProductService(new ProductRepository(), logger),
+                ServiceMode.Http => new HttpProductService(productsBaseUrl!, logger),
+                _ => throw new NotSupportedException(string.Format("Products mode {0} is not implemented.", productsMode))
+            };
+            return new ServiceContainer(products, orders, logger);
         }
 
         public static AppDbContext CreateDbContext()
@@ -69,10 +76,10 @@ namespace CoreWebForms
         public IOrderService Orders { get; }
         public ILogger Log { get; }
 
-        public ServiceContainer(IProductRepository productRepo, IOrderRepository orderRepo, ILogger logger)
+        public ServiceContainer(IProductService products, IOrderService orders, ILogger logger)
         {
-            Products = new ProductService(productRepo, logger);
-            Orders = new OrderService(orderRepo, logger);
+            Products = products;
+            Orders = orders;
             Log = logger;
         }
     }
