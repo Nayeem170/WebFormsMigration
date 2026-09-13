@@ -229,7 +229,17 @@ Steps:
    replayed reserve or release that races its first delivery raises a unique
    violation instead of returning `replayed: true`. Catch the unique
    violation on `ReservationKeys` / `ReleaseKeys` inserts and return the
-   replay response - the wire fact the characterization suite pins.
+   replay response - the wire fact the characterization suite pins. The
+   catch is not replay ergonomics; it is half of what keeps concurrent
+   delete safe. Orders' delete is check-then-set on `IsDeleted` - a TOCTOU -
+   but two racing deletes send Catalog the same deterministic release key
+   (`"order:" + order.Id`), and Catalog increments stock and inserts the key
+   in one transaction, so the loser's key violation rolls back its increment
+   with it. On SQLite the serialization provides that pairing; on Postgres
+   it is the transaction plus this catch. Without the catch the increment is
+   still rolled back (no stock inflation) but the wire answer becomes an
+   unhandled 500 on a path that returns 200 today - the mirror of the
+   oversell guard, and non-negotiable for the same reason.
 3. Provider switch: add `Npgsql.EntityFrameworkCore.PostgreSQL`; make the
    provider a configuration choice (`Database:Provider` = `sqlite` |
    `postgres`). This touches the `AppDbContext` constructor and
@@ -249,7 +259,11 @@ Steps:
    (Frontend's pattern, minus its true code default - the false must not
    depend on a config file Phase 3 is about to replace with env vars) plus
    a migrator entrypoint that applies migrations and seeds once, under a
-   lock, before replicas exist. Two instances racing `Migrate()` on Postgres
+   lock, before replicas exist. The migrator runs under its own role with
+   DDL rights, distinct from both service roles - sharing a service
+   connection string would give every runtime replica CREATE/DROP and make
+   step 3's grants decorative. Service roles get DML on their own schema
+   only. Two instances racing `Migrate()` on Postgres
    fail on duplicate objects; racing the seed check double-seeds. This is
    the fix Phase 5 would otherwise discover late.
 5. The remaining semantic differences are real but secondary to the above:
