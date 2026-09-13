@@ -9,6 +9,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace CoreWebForms
 {
+    public enum ServiceMode
+    {
+        InProcess
+    }
+
     public static class AppData
     {
         private static readonly Regex _safeDbPath = new Regex(@"\A[^\x00-\x1f;]+\z", RegexOptions.Compiled);
@@ -16,7 +21,7 @@ namespace CoreWebForms
 
         public static ServiceContainer Services { get; private set; } = null!;
 
-        public static void Initialize(string dbPath)
+        public static void Initialize(string dbPath, ServiceMode mode = ServiceMode.InProcess)
         {
             DbPath = dbPath ?? throw new ArgumentNullException(nameof(dbPath));
             if (!_safeDbPath.IsMatch(DbPath))
@@ -27,7 +32,14 @@ namespace CoreWebForms
                 Directory.CreateDirectory(dir);
 
             EnsureDatabase(DbPath);
-            Services = new ServiceContainer(
+            Services = CreateServices(mode);
+        }
+
+        private static ServiceContainer CreateServices(ServiceMode mode)
+        {
+            if (mode != ServiceMode.InProcess)
+                throw new NotSupportedException(string.Format("Service mode {0} is not implemented; the HTTP arm arrives in Phase 3.", mode));
+            return new ServiceContainer(
                 new ProductRepository(),
                 new OrderRepository(),
                 new AppLogger()

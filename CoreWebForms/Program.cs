@@ -41,7 +41,11 @@ namespace CoreWebForms
 
             var dbRelativePath = builder.Configuration["Database:RelativePath"] ?? "App_Data/inventory.db";
             var dbPath = Path.Combine(contentRoot, dbRelativePath);
-            AppData.Initialize(dbPath);
+            var serviceMode = ServiceMode.InProcess;
+            var serviceModeText = builder.Configuration["Services:Mode"];
+            if (!string.IsNullOrEmpty(serviceModeText) && !Enum.TryParse<ServiceMode>(serviceModeText, ignoreCase: true, out serviceMode))
+                throw new InvalidOperationException(string.Format("Unknown Services:Mode value '{0}'.", serviceModeText));
+            AppData.Initialize(dbPath, serviceMode);
 
             var logDir = Path.Combine(contentRoot, "App_Data", "logs");
             Directory.CreateDirectory(logDir);
