@@ -13,7 +13,7 @@ namespace Catalog
         public void Seed()
         {
             SeedProducts();
-            SeedOrders();
+            ApplySeededOrderDecrement();
         }
 
         private void SeedProducts()
@@ -35,39 +35,20 @@ namespace Catalog
             _db.SaveChanges();
         }
 
-        private void SeedOrders()
+        private void ApplySeededOrderDecrement()
         {
-            var products = _db.Products.OrderBy(p => p.Id).ToList();
-            var orders = new List<Order>
+            var seededOrderItems = new (int ProductId, int Quantity)[]
             {
-                new Order { CustomerName = "Alice Johnson", CustomerEmail = "alice@example.com", OrderDate = new DateTime(2024, 5, 1), DeliveryDate = new DateTime(2024, 5, 7), Status = AppConstants.OrderStatus.Delivered, Priority = AppConstants.OrderPriority.Normal, Extras = new List<string> { "Gift wrap" }, Items = new List<OrderItem> { new OrderItem { ProductId = products[0].Id, ProductName = products[0].Name, Quantity = 2, UnitPrice = products[0].Price } } },
-                new Order { CustomerName = "Bob Smith", CustomerEmail = "bob@example.com", OrderDate = new DateTime(2024, 5, 3), DeliveryDate = new DateTime(2024, 5, 10), Status = AppConstants.OrderStatus.Delivered, Priority = AppConstants.OrderPriority.Low, Extras = new List<string>(), Items = new List<OrderItem> { new OrderItem { ProductId = products[7].Id, ProductName = products[7].Name, Quantity = 1, UnitPrice = products[7].Price } } },
-                new Order { CustomerName = "Carol White", CustomerEmail = "carol@example.com", OrderDate = new DateTime(2024, 5, 10), DeliveryDate = new DateTime(2024, 5, 17), Status = AppConstants.OrderStatus.Shipped, Priority = AppConstants.OrderPriority.High, Extras = new List<string> { "Express delivery" }, Items = new List<OrderItem> { new OrderItem { ProductId = products[1].Id, ProductName = products[1].Name, Quantity = 1, UnitPrice = products[1].Price } } },
-                new Order { CustomerName = "Dave Lee", CustomerEmail = "dave@example.com", OrderDate = new DateTime(2024, 5, 12), DeliveryDate = new DateTime(2024, 5, 20), Status = AppConstants.OrderStatus.Processing, Priority = AppConstants.OrderPriority.Normal, Extras = new List<string>(), Items = new List<OrderItem> { new OrderItem { ProductId = products[4].Id, ProductName = products[4].Name, Quantity = 3, UnitPrice = products[4].Price } } },
-                new Order { CustomerName = "Eve Davis", CustomerEmail = "eve@example.com", OrderDate = new DateTime(2024, 5, 14), DeliveryDate = new DateTime(2024, 5, 22), Status = AppConstants.OrderStatus.Pending, Priority = AppConstants.OrderPriority.Low, Extras = new List<string>(), Items = new List<OrderItem> { new OrderItem { ProductId = products[10].Id, ProductName = products[10].Name, Quantity = 1, UnitPrice = products[10].Price } } },
-                new Order { CustomerName = "Frank Miller", CustomerEmail = "frank@example.com", OrderDate = new DateTime(2024, 5, 15), DeliveryDate = new DateTime(2024, 5, 23), Status = AppConstants.OrderStatus.Pending, Priority = AppConstants.OrderPriority.Normal, Extras = new List<string> { "Insurance" }, Items = new List<OrderItem> { new OrderItem { ProductId = products[0].Id, ProductName = products[0].Name, Quantity = 1, UnitPrice = products[0].Price } } },
-                new Order { CustomerName = "Grace Kim", CustomerEmail = "grace@example.com", OrderDate = new DateTime(2024, 5, 16), DeliveryDate = new DateTime(2024, 5, 24), Status = AppConstants.OrderStatus.Pending, Priority = AppConstants.OrderPriority.High, Extras = new List<string> { "Gift wrap", "Express delivery" }, Items = new List<OrderItem> { new OrderItem { ProductId = products[10].Id, ProductName = products[10].Name, Quantity = 1, UnitPrice = products[10].Price }, new OrderItem { ProductId = products[11].Id, ProductName = products[11].Name, Quantity = 3, UnitPrice = products[11].Price } } },
-                new Order { CustomerName = "Henry Patel", CustomerEmail = "henry@example.com", OrderDate = new DateTime(2024, 5, 18), DeliveryDate = new DateTime(2024, 5, 26), Status = AppConstants.OrderStatus.Processing, Priority = AppConstants.OrderPriority.Normal, Extras = new List<string>(), Items = new List<OrderItem> { new OrderItem { ProductId = products[4].Id, ProductName = products[4].Name, Quantity = 1, UnitPrice = products[4].Price }, new OrderItem { ProductId = products[7].Id, ProductName = products[7].Name, Quantity = 1, UnitPrice = products[7].Price } } },
-                new Order { CustomerName = "Iris Chen", CustomerEmail = "iris@example.com", OrderDate = new DateTime(2024, 5, 20), DeliveryDate = new DateTime(2024, 5, 28), Status = AppConstants.OrderStatus.Shipped, Priority = AppConstants.OrderPriority.Low, Extras = new List<string> { "Insurance" }, Items = new List<OrderItem> { new OrderItem { ProductId = products[2].Id, ProductName = products[2].Name, Quantity = 1, UnitPrice = products[2].Price } } },
-                new Order { CustomerName = "Jack Brown", CustomerEmail = "jack@example.com", OrderDate = new DateTime(2024, 5, 22), DeliveryDate = new DateTime(2024, 5, 30), Status = AppConstants.OrderStatus.Delivered, Priority = AppConstants.OrderPriority.Normal, Extras = new List<string>(), Items = new List<OrderItem> { new OrderItem { ProductId = products[1].Id, ProductName = products[1].Name, Quantity = 1, UnitPrice = products[1].Price } } },
-                new Order { CustomerName = "Karen Novak", CustomerEmail = "karen@example.com", OrderDate = new DateTime(2024, 5, 25), DeliveryDate = new DateTime(2024, 6, 2), Status = AppConstants.OrderStatus.Delivered, Priority = AppConstants.OrderPriority.High, Extras = new List<string> { "Gift wrap", "Insurance" }, Items = new List<OrderItem> { new OrderItem { ProductId = products[7].Id, ProductName = products[7].Name, Quantity = 1, UnitPrice = products[7].Price }, new OrderItem { ProductId = products[11].Id, ProductName = products[11].Name, Quantity = 3, UnitPrice = products[11].Price } } },
-                new Order { CustomerName = "Leo Garcia", CustomerEmail = "leo@example.com", OrderDate = new DateTime(2024, 5, 28), DeliveryDate = new DateTime(2024, 6, 5), Status = AppConstants.OrderStatus.Processing, Priority = AppConstants.OrderPriority.Normal, Extras = new List<string>(), Items = new List<OrderItem> { new OrderItem { ProductId = products[0].Id, ProductName = products[0].Name, Quantity = 1, UnitPrice = products[0].Price } } }
+                (1, 2), (8, 1), (2, 1), (5, 3), (11, 1), (1, 1), (11, 1), (12, 3), (5, 1), (8, 1), (3, 1), (2, 1), (8, 1), (12, 3), (1, 1)
             };
 
-            foreach (var o in orders)
-                o.Total = o.Items.Sum(i => i.Quantity * i.UnitPrice);
-
-            _db.Orders.AddRange(orders);
-            _db.SaveChanges();
-
-            foreach (var item in orders.SelectMany(o => o.Items))
+            foreach (var item in seededOrderItems)
             {
-                var product = products.FirstOrDefault(p => p.Id == item.ProductId);
-                if (product != null)
-                {
-                    product.Stock -= item.Quantity;
-                    if (product.Stock <= 0) product.IsActive = false;
-                }
+                var product = _db.Products.Find(item.ProductId);
+                if (product == null)
+                    throw new InvalidOperationException($"Seed decrement references missing product ID {item.ProductId}.");
+                product.Stock -= item.Quantity;
+                if (product.Stock <= 0) product.IsActive = false;
             }
             _db.SaveChanges();
         }

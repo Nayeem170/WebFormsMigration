@@ -23,6 +23,21 @@ builder.Services.AddScoped<AppDbContext>(_ => new AppDbContext(dbPath));
 
 var app = builder.Build();
 
+using (var scope = app.Services.CreateScope())
+{
+    var dbDir = Path.GetDirectoryName(dbPath);
+    if (!string.IsNullOrEmpty(dbDir))
+        Directory.CreateDirectory(dbDir);
+
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.Migrate();
+    db.Database.OpenConnection();
+    db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
+    db.Database.CloseConnection();
+    if (!db.Orders.Any())
+        new DbSeeder(db).Seed();
+}
+
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
 app.MapGet("/api/orders", (bool includeDeleted, string? status, int skip, int take, AppDbContext db) =>
