@@ -49,8 +49,13 @@ namespace CoreWebForms
             if (!string.IsNullOrEmpty(productsModeText) && !Enum.TryParse<ServiceMode>(productsModeText, ignoreCase: true, out productsMode))
                 throw new InvalidOperationException(string.Format("Unknown Services:Products:Mode value '{0}'.", productsModeText));
             var productsBaseUrl = builder.Configuration["Services:Products:BaseUrl"];
+            var ordersModeText = builder.Configuration["Services:Orders:Mode"];
+            var ordersMode = ServiceMode.InProcess;
+            if (!string.IsNullOrEmpty(ordersModeText) && !Enum.TryParse<ServiceMode>(ordersModeText, ignoreCase: true, out ordersMode))
+                throw new InvalidOperationException(string.Format("Unknown Services:Orders:Mode value '{0}'.", ordersModeText));
+            var ordersBaseUrl = builder.Configuration["Services:Orders:BaseUrl"];
             var runMigrations = builder.Configuration.GetValue<bool?>("Database:Migrate") ?? true;
-            AppData.Initialize(dbPath, productsMode, productsBaseUrl, runMigrations);
+            AppData.Initialize(dbPath, productsMode, productsBaseUrl, runMigrations, ordersMode, ordersBaseUrl);
 
             var logDir = Path.Combine(contentRoot, "App_Data", "logs");
             Directory.CreateDirectory(logDir);

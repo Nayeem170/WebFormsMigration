@@ -22,7 +22,7 @@ namespace CoreWebForms
 
         public static ServiceContainer Services { get; private set; } = null!;
 
-        public static void Initialize(string dbPath, ServiceMode productsMode = ServiceMode.InProcess, string? productsBaseUrl = null, bool runMigrations = true)
+        public static void Initialize(string dbPath, ServiceMode productsMode = ServiceMode.InProcess, string? productsBaseUrl = null, bool runMigrations = true, ServiceMode ordersMode = ServiceMode.InProcess, string? ordersBaseUrl = null)
         {
             DbPath = dbPath ?? throw new ArgumentNullException(nameof(dbPath));
             if (!_safeDbPath.IsMatch(DbPath))
@@ -34,16 +34,23 @@ namespace CoreWebForms
 
             if (runMigrations)
                 EnsureDatabase(DbPath);
-            Services = CreateServices(productsMode, productsBaseUrl);
+            Services = CreateServices(productsMode, productsBaseUrl, ordersMode, ordersBaseUrl);
         }
 
-        private static ServiceContainer CreateServices(ServiceMode productsMode, string? productsBaseUrl)
+        private static ServiceContainer CreateServices(ServiceMode productsMode, string? productsBaseUrl, ServiceMode ordersMode, string? ordersBaseUrl)
         {
             if (productsMode == ServiceMode.Http && string.IsNullOrEmpty(productsBaseUrl))
                 throw new ArgumentException("Services:Products:BaseUrl is required when Services:Products:Mode is Http.", nameof(productsBaseUrl));
+            if (ordersMode == ServiceMode.Http && string.IsNullOrEmpty(ordersBaseUrl))
+                throw new ArgumentException("Services:Orders:BaseUrl is required when Services:Orders:Mode is Http.", nameof(ordersBaseUrl));
 
             var logger = new AppLogger();
-            var orders = new OrderService(new OrderRepository(), logger);
+            IOrderService orders = ordersMode switch
+            {
+                ServiceMode.InProcess => new OrderService(new OrderRepository(), logger),
+                ServiceMode.Http => new HttpOrderService(ordersBaseUrl!, logger),
+                _ => throw new NotSupportedException(string.Format("Orders mode {0} is not implemented.", ordersMode))
+            };
             IProductService products = productsMode switch
             {
                 ServiceMode.InProcess => new ProductService(new ProductRepository(), logger),
