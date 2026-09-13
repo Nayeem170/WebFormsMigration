@@ -10,3 +10,6 @@ packages/
 .claude*
 .nuget/
 WebFormsSample/
+artifacts/
+App_Data/*.db-*
+**/App_Data/

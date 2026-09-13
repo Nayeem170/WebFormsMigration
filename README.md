@@ -19,13 +19,14 @@ ASP.NET Web Forms 4.8 to .NET 9 migration using [CoreWebForms](https://github.co
 5. **Session** — Distributed session with JSON serializer
 6. **Static files & routing** — UseStaticFiles, MapPageRoute, middleware pipeline
 
-See [docs/migration/](docs/migration/00-index.md) for the full migration guide.
+See [docs/migration/](docs/migration/00-index.md) for the full migration guide, including [the microservices migration plan](docs/migration/08-microservices-migration.md).
 
 ## Running
 
 ```bash
-cd CoreWebForms
-dotnet run
+dotnet run --project Microservices/Catalog
+dotnet run --project Microservices/Orders
+dotnet run --project Microservices/Frontend
 ```
 
-Opens at `http://localhost:8081`.
+Frontend opens at `http://localhost:8081` (Catalog on `8094`, Orders on `8095`). `scripts/publish-local.ps1` publishes all three to `artifacts/publish`. The retired in-process `CoreWebForms/` tree is recoverable from the `corewebforms-final` tag.

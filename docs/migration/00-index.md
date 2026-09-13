@@ -36,6 +36,7 @@ This guide is based on the actual migration of the **LegacyWebForms** inventory 
 | 4 | Session — distributed session, JSON serializer | [Phase 4](04-session.md) |
 | 5 | ASPX pages — Bind to typed Container.DataItem cast, remove unsupported controls | [Phase 5](05-aspx-pages.md) |
 | 6 | Static files, routing, middleware pipeline | [Phase 6](06-static-files-routing.md) |
+| 7 | Microservices migration - local-only three-service plan | [Plan](08-microservices-migration.md) |
 
 ## Prerequisites
 
