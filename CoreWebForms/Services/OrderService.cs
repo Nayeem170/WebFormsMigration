@@ -4,7 +4,6 @@ using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using CoreWebForms.Core;
 using CoreWebForms.Data;
-using Microsoft.EntityFrameworkCore;
 
 namespace CoreWebForms.Services
 {
@@ -74,75 +73,43 @@ namespace CoreWebForms.Services
                 Validate(item);
             order.Total = order.Items.Sum(i => i.Quantity * i.UnitPrice);
 
-            using var db = AppData.CreateDbContext();
-            using var tx = db.Database.BeginTransaction();
-
-                db.Orders.Add(order);
-                db.SaveChanges();
-
-                foreach (var item in order.Items)
-                {
-                    var product = db.Products.Find(item.ProductId);
-                    if (product == null)
-                        throw new InvalidOperationException(
-                            string.Format("Product ID {0} not found.", item.ProductId));
-                    if (product.Stock < item.Quantity)
-                        throw new InvalidOperationException(
-                            string.Format("Insufficient stock for product ID {0}: requested {1}, available {2}", item.ProductId, item.Quantity, product.Stock));
-                    product.Stock -= item.Quantity;
-                    if (product.Stock <= 0) product.IsActive = false;
-                }
-                db.SaveChanges();
-                tx.Commit();
-                _log.Info(string.Format("Order #{0} placed for {1} ({2} items, ${3:F2})", order.Id, order.CustomerName, order.Items.Count, order.Total));
-                return order.Id;
+            var orderId = _repo.PlaceOrder(order);
+            _log.Info(string.Format("Order #{0} placed for {1} ({2} items, ${3:F2})", order.Id, order.CustomerName, order.Items.Count, order.Total));
+            return orderId;
         }
 
         public void UpdateStatus(int orderId, string status, string priority)
         {
-            using var db = AppData.CreateDbContext();
-            var existing = db.Orders.Find(orderId);
-            if (existing == null || existing.IsDeleted)
+            ValidateStatusFields(status, priority);
+            if (!_repo.TryUpdateStatus(orderId, status, priority))
             {
                 _log.Warning(string.Format("Rejected status update on deleted/missing order #{0}", orderId));
                 return;
             }
-            existing.Status = status;
-            existing.Priority = priority;
-            Validate(existing);
-            db.SaveChanges();
             _log.Info(string.Format("Order #{0} status changed to {1}", orderId, status));
         }
 
         public void DeleteOrder(int id)
         {
-            using var db = AppData.CreateDbContext();
-            using var tx = db.Database.BeginTransaction();
-
-                var order = db.Orders.Include(o => o.Items).FirstOrDefault(o => o.Id == id);
-                if (order == null || order.IsDeleted) return;
-
-                foreach (var item in order.Items)
-                {
-                    var product = db.Products.Find(item.ProductId);
-                    if (product != null)
-                    {
-                        product.Stock += item.Quantity;
-                        if (product.Stock > 0 && !product.IsDeleted)
-                            product.IsActive = true;
-                    }
-                }
-
-                order.IsDeleted = true;
-                db.SaveChanges();
-                tx.Commit();
-                _log.Info(string.Format("Order #{0} deleted, stock restored for {1} items", id, order.Items.Count));
+            var deleted = _repo.DeleteOrder(id);
+            if (deleted == null) return;
+            _log.Info(string.Format("Order #{0} deleted, stock restored for {1} items", id, deleted.Items.Count));
         }
 
         private static void Validate(object model)
         {
             var results = new List<ValidationResult>();
             if (!Validator.TryValidateObject(model, new ValidationContext(model), results, true))
+                throw new ValidationException(string.Join("; ", results.Select(r => r.ErrorMessage)));
+        }
+
+        private static void ValidateStatusFields(string status, string priority)
+        {
+            var probe = new Order();
+            var results = new List<ValidationResult>();
+            var ok = Validator.TryValidateProperty(status, new ValidationContext(probe) { MemberName = nameof(Order.Status) }, results);
+            ok &= Validator.TryValidateProperty(priority, new ValidationContext(probe) { MemberName = nameof(Order.Priority) }, results);
+            if (!ok)
                 throw new ValidationException(string.Join("; ", results.Select(r => r.ErrorMessage)));
         }
     }

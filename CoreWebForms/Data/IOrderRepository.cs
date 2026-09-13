@@ -13,5 +13,8 @@ namespace CoreWebForms.Data
         List<Order> GetRecent(int count);
         List<OrderItem> GetItems(int orderId);
         List<Order> GetPaged(int skip, int take, bool includeDeleted, string? status);
+        int PlaceOrder(Order order);
+        bool TryUpdateStatus(int orderId, string status, string priority);
+        Order? DeleteOrder(int id);
     }
 }
