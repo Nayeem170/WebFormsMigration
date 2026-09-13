@@ -11,3 +11,4 @@ packages/
 .nuget/
 WebFormsSample/
 artifacts/
+App_Data/*.db-*
