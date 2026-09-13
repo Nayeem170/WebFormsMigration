@@ -14,11 +14,39 @@ namespace CoreWebForms
 
         private void BindDashboard()
         {
-            var products = AppData.Services.Products.GetAll();
+            BindCatalogZones();
+            BindOrdersZone();
+        }
+
+        private void BindCatalogZones()
+        {
+            List<Product> products;
+            try
+            {
+                products = AppData.Services.Products.GetAll();
+            }
+            catch (Exception ex) when (UiHelper.IsTransportFailure(ex))
+            {
+                statCards.ShowServiceUnavailable("Catalog");
+                catExpand.ShowServiceUnavailable("Catalog");
+                outOfStock.Visible = false;
+                return;
+            }
             statCards.Bind(products);
-            ordersTable.Bind(AppData.Services.Orders.GetRecent(6));
             catExpand.Bind(products);
             outOfStock.Bind(products);
+        }
+
+        private void BindOrdersZone()
+        {
+            try
+            {
+                ordersTable.Bind(AppData.Services.Orders.GetRecent(6));
+            }
+            catch (Exception ex) when (UiHelper.IsTransportFailure(ex))
+            {
+                ordersTable.ShowServiceUnavailable("Orders");
+            }
         }
     }
 }

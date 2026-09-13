@@ -36,10 +36,18 @@ namespace CoreWebForms
         {
             ddlProduct.Items.Clear();
             ddlProduct.Items.Add(new ListItem("-- Select product --", ""));
-            foreach (var p in AppData.Services.Products.GetAll().Where(x => x.IsActive && x.Stock > 0))
-                ddlProduct.Items.Add(new ListItem(
-                    string.Format("{0}  (${1:F2})", p.Name, p.Price),
-                    p.Id.ToString()));
+            try
+            {
+                foreach (var p in AppData.Services.Products.GetAll().Where(x => x.IsActive && x.Stock > 0))
+                    ddlProduct.Items.Add(new ListItem(
+                        string.Format("{0}  (${1:F2})", p.Name, p.Price),
+                        p.Id.ToString()));
+            }
+            catch (Exception ex) when (UiHelper.IsTransportFailure(ex))
+            {
+                lblCartWarning.Text = UiHelper.ServiceUnavailableMessage("Catalog");
+                lblCartWarning.Visible = true;
+            }
             ddlProduct.SelectedIndex = 0;
         }
 

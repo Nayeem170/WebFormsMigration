@@ -1,11 +1,20 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
 using System.Web;
 
 namespace CoreWebForms
 {
     public static class UiHelper
     {
+        public static bool IsTransportFailure(Exception ex)
+            => ex is HttpRequestException or TaskCanceledException;
+
+        public static string ServiceUnavailableMessage(string serviceName)
+            => string.Format("{0} is unavailable right now. Data returns when the service is back.",
+                HttpUtility.HtmlEncode(serviceName));
+
         public static string GetStatusBadge(string status)
         {
             string encoded = HttpUtility.HtmlEncode(status ?? "");

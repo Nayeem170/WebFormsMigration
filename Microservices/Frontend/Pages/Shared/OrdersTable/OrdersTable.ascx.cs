@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Web.UI;
@@ -13,8 +14,17 @@ namespace CoreWebForms
         public void Bind(IEnumerable<Order> orders)
         {
             _itemsCache = orders.ToDictionary(o => o.Id, o => o.Items);
+            tableWrap.Visible = true;
+            phUnavailable.Visible = false;
             rptTable.DataSource = orders;
             rptTable.DataBind();
+        }
+
+        public void ShowServiceUnavailable(string serviceName)
+        {
+            tableWrap.Visible = false;
+            phUnavailable.Visible = true;
+            litUnavailable.Text = UiHelper.ServiceUnavailableMessage(serviceName);
         }
 
         protected string RowStyle(object isDeletedObj)
@@ -28,7 +38,14 @@ namespace CoreWebForms
             List<OrderItem> items;
             if (_itemsCache.TryGetValue(orderId, out items))
                 return UiHelper.FormatItemNames(items);
-            return UiHelper.FormatItemNames(AppData.Services.Orders.GetItems(orderId));
+            try
+            {
+                return UiHelper.FormatItemNames(AppData.Services.Orders.GetItems(orderId));
+            }
+            catch (Exception ex) when (UiHelper.IsTransportFailure(ex))
+            {
+                return "<span style='color:#9a9790'>Orders unavailable</span>";
+            }
         }
 
         protected string StatusBadge(object isDeletedObj, object statusObj)

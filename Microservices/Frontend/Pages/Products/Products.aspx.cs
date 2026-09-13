@@ -37,7 +37,18 @@ namespace CoreWebForms
             string cat        = ddlFilter.SelectedValue;
             string activeVal  = ddlActiveFilter.SelectedValue;
 
-            var all = _products.GetAll(includeDeleted: activeVal == "inactive");
+            List<Product> all;
+            try
+            {
+                all = _products.GetAll(includeDeleted: activeVal == "inactive");
+            }
+            catch (Exception ex) when (UiHelper.IsTransportFailure(ex))
+            {
+                lblRowCount.Text = UiHelper.ServiceUnavailableMessage("Catalog");
+                gvProducts.DataSource = new List<Product>();
+                gvProducts.DataBind();
+                return;
+            }
             productSummary.Bind(activeVal == "inactive" ? _products.GetAll() : all);
 
             var query = all.AsEnumerable();

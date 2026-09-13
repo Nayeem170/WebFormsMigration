@@ -17,7 +17,21 @@ namespace CoreWebForms
             string dir = ViewState["OrderDir"]?.ToString() ?? "DESC";
             string status = ddlStatusFilter.SelectedValue;
 
-            var orders = AppData.Services.Orders.GetAll(false, status);
+            List<Order> orders;
+            try
+            {
+                orders = AppData.Services.Orders.GetAll(false, status);
+            }
+            catch (Exception ex) when (UiHelper.IsTransportFailure(ex))
+            {
+                lblOrderCount.Text = "";
+                lblOrderError.Text = UiHelper.ServiceUnavailableMessage("Orders");
+                lblOrderError.Visible = true;
+                gvOrders.DataSource = new List<Order>();
+                gvOrders.DataBind();
+                upOrders.Update();
+                return;
+            }
 
             _itemsCache = orders.ToDictionary(o => o.Id, o => o.Items);
 
@@ -205,7 +219,14 @@ namespace CoreWebForms
         {
             if (_itemsCache.TryGetValue(orderId, out var items))
                 return UiHelper.FormatItemNames(items);
-            return UiHelper.FormatItemNames(AppData.Services.Orders.GetItems(orderId));
+            try
+            {
+                return UiHelper.FormatItemNames(AppData.Services.Orders.GetItems(orderId));
+            }
+            catch (Exception ex) when (UiHelper.IsTransportFailure(ex))
+            {
+                return "<span style='color:#9a9790'>Orders unavailable</span>";
+            }
         }
     }
 }

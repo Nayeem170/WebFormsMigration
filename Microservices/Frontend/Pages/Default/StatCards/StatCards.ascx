@@ -1,5 +1,5 @@
 <%@ Control Language="C#" AutoEventWireup="true" CodeBehind="StatCards.ascx.cs" Inherits="CoreWebForms.StatCardsControl" %>
-<div class="stats">
+<div class="stats" runat="server" id="statsRow">
         <a href="~/Pages/Products/Products.aspx" runat="server" class="sc">
         <div class="sc-label">Total Products</div>
         <div class="sc-val"><asp:Literal ID="litTotalProducts" runat="server" /></div>
@@ -21,3 +21,6 @@
         <div class="sc-hint red">action needed &rarr;</div>
     </a>
 </div>
+<asp:PlaceHolder ID="phUnavailable" runat="server" Visible="false">
+    <div class="card" style="padding:12px;color:#b3372f"><asp:Literal ID="litUnavailable" runat="server" /></div>
+</asp:PlaceHolder>

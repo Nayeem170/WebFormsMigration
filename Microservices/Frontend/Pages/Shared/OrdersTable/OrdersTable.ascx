@@ -1,5 +1,6 @@
 <%@ Control Language="C#" AutoEventWireup="true" CodeBehind="OrdersTable.ascx.cs" Inherits="CoreWebForms.OrdersTableControl" %>
 <%@ Import Namespace="CoreWebForms" %>
+<div runat="server" id="tableWrap">
 <asp:Repeater ID="rptTable" runat="server">
     <HeaderTemplate>
         <table class="grid" style="width:100%">
@@ -16,3 +17,7 @@
     </ItemTemplate>
     <FooterTemplate></table></FooterTemplate>
 </asp:Repeater>
+</div>
+<asp:PlaceHolder ID="phUnavailable" runat="server" Visible="false">
+    <div style="padding:12px;color:#b3372f"><asp:Literal ID="litUnavailable" runat="server" /></div>
+</asp:PlaceHolder>

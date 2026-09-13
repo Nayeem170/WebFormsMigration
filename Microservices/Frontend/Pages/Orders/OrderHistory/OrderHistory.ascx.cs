@@ -19,18 +19,28 @@ namespace CoreWebForms
 
         public void Bind()
         {
-            int total = AppData.Services.Orders.Count(includeDeleted: ShowDeleted, status: null);
-            int pages = (int)Math.Ceiling((double)total / HistoryPageSize);
-            if (pages == 0) HistoryPage = 0;
-            else if (HistoryPage >= pages) HistoryPage = pages - 1;
-            if (HistoryPage < 0) HistoryPage = 0;
+            try
+            {
+                int total = AppData.Services.Orders.Count(includeDeleted: ShowDeleted, status: null);
+                int pages = (int)Math.Ceiling((double)total / HistoryPageSize);
+                if (pages == 0) HistoryPage = 0;
+                else if (HistoryPage >= pages) HistoryPage = pages - 1;
+                if (HistoryPage < 0) HistoryPage = 0;
 
-            var page = AppData.Services.Orders.GetPaged(HistoryPage * HistoryPageSize, HistoryPageSize, ShowDeleted, null);
-            ordersTable.Bind(page);
+                var page = AppData.Services.Orders.GetPaged(HistoryPage * HistoryPageSize, HistoryPageSize, ShowDeleted, null);
+                ordersTable.Bind(page);
 
-            lblHistPage.Text = pages > 0 ? string.Format("{0} / {1}", HistoryPage + 1, pages) : "";
-            lnkHistPrev.Visible = HistoryPage > 0;
-            lnkHistNext.Visible = HistoryPage < pages - 1;
+                lblHistPage.Text = pages > 0 ? string.Format("{0} / {1}", HistoryPage + 1, pages) : "";
+                lnkHistPrev.Visible = HistoryPage > 0;
+                lnkHistNext.Visible = HistoryPage < pages - 1;
+            }
+            catch (Exception ex) when (UiHelper.IsTransportFailure(ex))
+            {
+                ordersTable.ShowServiceUnavailable("Orders");
+                lblHistPage.Text = "";
+                lnkHistPrev.Visible = false;
+                lnkHistNext.Visible = false;
+            }
             upHistory.Update();
         }
 

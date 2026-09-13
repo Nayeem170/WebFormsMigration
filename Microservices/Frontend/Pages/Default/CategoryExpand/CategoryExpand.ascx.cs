@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -12,6 +13,13 @@ namespace CoreWebForms
         public void Bind(List<Product> products)
         {
             BindCategoryExpand(products);
+        }
+
+        public void ShowServiceUnavailable(string serviceName)
+        {
+            cardCategories.Visible = false;
+            phUnavailable.Visible = true;
+            litUnavailable.Text = UiHelper.ServiceUnavailableMessage(serviceName);
         }
 
         private void BindCategoryExpand(List<Product> products)
@@ -34,7 +42,14 @@ namespace CoreWebForms
             string cat = e.CommandArgument.ToString();
             string? cur = ViewState["ExpandedCat"] as string;
             ViewState["ExpandedCat"] = cur == cat ? null : cat;
-            BindCategoryExpand(AppData.Services.Products.GetAll());
+            try
+            {
+                BindCategoryExpand(AppData.Services.Products.GetAll());
+            }
+            catch (Exception ex) when (UiHelper.IsTransportFailure(ex))
+            {
+                ShowServiceUnavailable("Catalog");
+            }
         }
 
         protected string GetProductList(object names)

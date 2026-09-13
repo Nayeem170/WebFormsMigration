@@ -1,5 +1,5 @@
 <%@ Control Language="C#" AutoEventWireup="true" CodeBehind="CategoryExpand.ascx.cs" Inherits="CoreWebForms.CategoryExpandControl" %>
-<div class="card">
+<div class="card" runat="server" id="cardCategories">
     <div class="ch"><span class="ct">Products by Category</span></div>
     <asp:Repeater ID="rptCatExpand" runat="server" OnItemCommand="rptCatExpand_ItemCommand">
         <ItemTemplate>
@@ -18,3 +18,6 @@
         </ItemTemplate>
     </asp:Repeater>
 </div>
+<asp:PlaceHolder ID="phUnavailable" runat="server" Visible="false">
+    <div class="card" style="padding:12px;color:#b3372f"><asp:Literal ID="litUnavailable" runat="server" /></div>
+</asp:PlaceHolder>
