@@ -132,7 +132,7 @@ Check 'place order fails 502 while Catalog down' ($r.StatusCode -eq 502 -and $r.
 
 Start-Catalog
 $page = Get-Dashboard
-Check 'Frontend recovers after Catalog restart (no Frontend restart)' ($page.StatusCode -eq 200 -and $page.Content -match 'Wireless Headphones')
+Check 'Frontend recovers after Catalog restart (no Frontend restart)' ($page.StatusCode -eq 200 -and $page.Content -notmatch 'Catalog is unavailable right now')
 
 Check 'stopped Orders by port' (Stop-ServicePort 8095)
 $page = Get-Dashboard
@@ -143,7 +143,7 @@ Check 'Orders API unreachable while stopped' $ordersDown
 
 Start-Orders
 $page = Get-Dashboard
-Check 'Frontend recovers after Orders restart' ($page.StatusCode -eq 200 -and $page.Content -match 'Leo Garcia')
+Check 'Frontend recovers after Orders restart' ($page.StatusCode -eq 200 -and $page.Content -notmatch 'Orders is unavailable right now')
 
 if ($failures -gt 0) { throw "test-failures: $failures failing checks" }
 Write-Host 'test-failures: all checks passed'

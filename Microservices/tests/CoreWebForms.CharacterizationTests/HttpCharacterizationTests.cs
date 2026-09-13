@@ -5,11 +5,12 @@ using Xunit.Sdk;
 
 namespace CoreWebForms.CharacterizationTests
 {
-    public class HttpCharacterizationTests
+    public class HttpCharacterizationTests : IDisposable
     {
         private static readonly HttpClient Http = CreateClient();
 
         private readonly string _run = Guid.NewGuid().ToString("N")[..8];
+        private readonly List<int> _createdProducts = new();
 
         private static HttpClient CreateClient()
         {
@@ -52,6 +53,7 @@ namespace CoreWebForms.CharacterizationTests
             var response = await Http.PostAsJsonAsync(CatalogBase + "/api/products", body);
             Assert.True(response.IsSuccessStatusCode, $"create product failed: {(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}");
             var id = (int)(await response.Content.ReadFromJsonAsync<int>())!;
+            _createdProducts.Add(id);
             return (await GetProductAsync(id))!;
         }
 
@@ -116,6 +118,14 @@ namespace CoreWebForms.CharacterizationTests
         private static async Task<JsonNode> ErrorOf(HttpResponseMessage response)
         {
             return JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        }
+
+        public void Dispose()
+        {
+            foreach (var id in _createdProducts)
+            {
+                try { Http.DeleteAsync($"{CatalogBase}/api/products/{id}").Wait(); } catch { }
+            }
         }
 
         [Fact]
