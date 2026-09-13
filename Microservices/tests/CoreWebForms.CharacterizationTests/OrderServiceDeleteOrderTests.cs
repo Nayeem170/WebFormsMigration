@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+using System.Linq;
 using Xunit;
 
 namespace CoreWebForms.CharacterizationTests
@@ -105,6 +107,33 @@ namespace CoreWebForms.CharacterizationTests
 
             var order = AppData.Services.Orders.GetAll(true).Single(o => o.Id == orderId);
             Assert.Equal("Pending", order.Status);
+        }
+
+        [Fact]
+        public void UpdateStatus_WithInvalidStatusOrPriority_ThrowsValidationException()
+        {
+            var id = AppData.Services.Products.Add(NewProduct(stock: 10, isActive: true));
+            var orderId = AppData.Services.Orders.PlaceOrder(NewOrder(NewItem(id, 1, 5m)));
+
+            Assert.Throws<ValidationException>(() =>
+                AppData.Services.Orders.UpdateStatus(orderId, "Bogus", "Normal"));
+            Assert.Throws<ValidationException>(() =>
+                AppData.Services.Orders.UpdateStatus(orderId, "Shipped", "Urgent"));
+
+            var order = AppData.Services.Orders.GetById(orderId)!;
+            Assert.Equal("Pending", order.Status);
+            Assert.Equal("Normal", order.Priority);
+        }
+
+        [Fact]
+        public void UpdateStatus_WithInvalidStatus_OnDeletedOrder_ThrowsValidationException()
+        {
+            var id = AppData.Services.Products.Add(NewProduct(stock: 10, isActive: true));
+            var orderId = AppData.Services.Orders.PlaceOrder(NewOrder(NewItem(id, 1, 5m)));
+            AppData.Services.Orders.DeleteOrder(orderId);
+
+            Assert.Throws<ValidationException>(() =>
+                AppData.Services.Orders.UpdateStatus(orderId, "Bogus", "Normal"));
         }
     }
 }
