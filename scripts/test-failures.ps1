@@ -1,7 +1,10 @@
 param(
     [string]$BaseUrl = 'http://localhost:8081',
     [string]$CatalogUrl = 'http://localhost:8094',
-    [string]$OrdersUrl = 'http://localhost:8095'
+    [string]$OrdersUrl = 'http://localhost:8095',
+    [switch]$RedisMode,
+    [string]$RedisStopCommand = 'docker stop ccw-redis',
+    [string]$RedisStartCommand = 'docker start ccw-redis'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -144,6 +147,25 @@ Check 'Orders API unreachable while stopped' $ordersDown
 Start-Orders
 $page = Get-Dashboard
 Check 'Frontend recovers after Orders restart' ($page.StatusCode -eq 200 -and $page.Content -notmatch 'Orders is unavailable right now')
+
+if ($RedisMode) {
+    Invoke-Expression $RedisStopCommand | Out-Null
+    Start-Sleep 3
+    $page = Get-Dashboard
+    Check 'dashboard survives Redis down (content intact)' ($page.StatusCode -eq 200 -and $page.Content -match 'Leo Garcia')
+    $products = Invoke-WebRequest ($BaseUrl + '/Pages/Products/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60
+    Check 'products page survives Redis down' ($products.StatusCode -eq 200 -and $products.Content -match 'Wireless Headphones')
+    $ordersPage = Invoke-WebRequest ($BaseUrl + '/Pages/Orders/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60
+    Check 'orders page degrades with Redis down (message, no trace)' ($ordersPage.StatusCode -eq 200 -and $ordersPage.Content -match 'Session store is unavailable right now' -and $ordersPage.Content -notmatch 'StackTrace')
+    Invoke-Expression $RedisStartCommand | Out-Null
+    $recovered = $false
+    foreach ($i in 1..20) {
+        $o = Invoke-WebRequest ($BaseUrl + '/Pages/Orders/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60
+        if ($o.Content -notmatch 'Session store is unavailable') { $recovered = $true; break }
+        Start-Sleep 1
+    }
+    Check 'orders page recovers after Redis restart' $recovered
+}
 
 if ($failures -gt 0) { throw "test-failures: $failures failing checks" }
 Write-Host 'test-failures: all checks passed'
