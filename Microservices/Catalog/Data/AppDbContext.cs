@@ -18,6 +18,8 @@ namespace Catalog
         public DbSet<Product> Products { get; set; } = null!;
         public DbSet<Order> Orders { get; set; } = null!;
         public DbSet<OrderItem> OrderItems { get; set; } = null!;
+        public DbSet<ReservationKey> ReservationKeys { get; set; } = null!;
+        public DbSet<ReleaseKey> ReleaseKeys { get; set; } = null!;
 
         protected override void OnConfiguring(DbContextOptionsBuilder options)
             => options.UseSqlite(_connectionString);
@@ -49,6 +51,16 @@ namespace Catalog
             {
                 e.HasKey(i => i.Id);
                 e.Ignore(i => i.LineTotal);
+            });
+
+            modelBuilder.Entity<ReservationKey>(e =>
+            {
+                e.HasKey(k => k.Key);
+            });
+
+            modelBuilder.Entity<ReleaseKey>(e =>
+            {
+                e.HasKey(k => k.Key);
             });
         }
     }

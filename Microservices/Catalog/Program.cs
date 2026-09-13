@@ -98,6 +98,56 @@ app.MapDelete("/api/products/{id:int}", (int id, AppDbContext db) =>
     return Results.NoContent();
 });
 
+app.MapPost("/api/products/reserve", (ReserveStockRequest request, AppDbContext db) =>
+{
+    var invalid = ValidateStockRequest(request.ReservationKey, "ReservationKey", request.Items);
+    if (invalid != null) return invalid;
+
+    if (db.ReservationKeys.Find(request.ReservationKey) != null)
+        return Results.Ok(new { reserved = true, replayed = true });
+
+    using var tx = db.Database.BeginTransaction();
+    foreach (var item in request.Items)
+    {
+        var product = db.Products.Find(item.ProductId);
+        if (product == null)
+            return StockRuleError(ApiErrorCodes.ProductNotFound,
+                string.Format("Product ID {0} not found.", item.ProductId));
+        if (product.Stock < item.Quantity)
+            return StockRuleError(ApiErrorCodes.InsufficientStock,
+                string.Format("Insufficient stock for product ID {0}: requested {1}, available {2}", item.ProductId, item.Quantity, product.Stock));
+        product.Stock -= item.Quantity;
+        if (product.Stock <= 0) product.IsActive = false;
+    }
+    db.ReservationKeys.Add(new ReservationKey { Key = request.ReservationKey, CreatedAt = DateTime.UtcNow });
+    db.SaveChanges();
+    tx.Commit();
+    return Results.Ok(new { reserved = true, replayed = false });
+});
+
+app.MapPost("/api/products/release", (ReleaseStockRequest request, AppDbContext db) =>
+{
+    var invalid = ValidateStockRequest(request.ReleaseKey, "ReleaseKey", request.Items);
+    if (invalid != null) return invalid;
+
+    if (db.ReleaseKeys.Find(request.ReleaseKey) != null)
+        return Results.Ok(new { released = true, replayed = true });
+
+    using var tx = db.Database.BeginTransaction();
+    foreach (var item in request.Items)
+    {
+        var product = db.Products.Find(item.ProductId);
+        if (product == null) continue;
+        product.Stock += item.Quantity;
+        if (product.Stock > 0 && !product.IsDeleted)
+            product.IsActive = true;
+    }
+    db.ReleaseKeys.Add(new ReleaseKey { Key = request.ReleaseKey, CreatedAt = DateTime.UtcNow });
+    db.SaveChanges();
+    tx.Commit();
+    return Results.Ok(new { released = true, replayed = false });
+});
+
 app.Run();
 
 static ProductDto ToDto(Product p) => new()
@@ -121,6 +171,35 @@ static IResult? ValidateDto(ProductDto dto)
             {
                 ErrorCode = "Validation",
                 Message = string.Join("; ", results.Select(r => r.ErrorMessage))
+            },
+            statusCode: 400);
+    return null;
+}
+
+static IResult StockRuleError(string errorCode, string message)
+{
+    return Results.Json(new ApiErrorResponse { ErrorCode = errorCode, Message = message }, statusCode: 409);
+}
+
+static IResult? ValidateStockRequest(string? key, string keyName, List<StockItemDto> items)
+{
+    var messages = new List<string>();
+    if (string.IsNullOrWhiteSpace(key))
+        messages.Add(string.Format("The {0} field is required.", keyName));
+    if (items.Count == 0)
+        messages.Add("At least one stock item is required.");
+    foreach (var item in items)
+    {
+        var results = new List<ValidationResult>();
+        if (!Validator.TryValidateObject(item, new ValidationContext(item), results, true))
+            messages.AddRange(results.Select(r => r.ErrorMessage!));
+    }
+    if (messages.Count > 0)
+        return Results.Json(
+            new ApiErrorResponse
+            {
+                ErrorCode = ApiErrorCodes.Validation,
+                Message = string.Join("; ", messages)
             },
             statusCode: 400);
     return null;
