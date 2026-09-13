@@ -40,7 +40,7 @@ namespace CoreWebForms.Services
         {
             if (product == null) throw new ArgumentNullException(nameof(product));
             Validate(product);
-            if (product.Stock == 0)
+            if (product.Stock <= 0)
                 product.IsActive = false;
             _log.Info(string.Format("Updating product #{0}", product.Id));
             _repo.Update(product);
