@@ -74,6 +74,13 @@ Spike result (2026-09-13, verified on this repo):
 - Code-behind compiles at build time, so seam types consumed from code-behind need nothing extra. Only ASPX markup and inline script that touch library types need the directive.
 - Existing pages are unaffected: root and Products pages served 200 throughout the spike run.
 
+Inactive-stock rule decision (2026-09-13):
+
+- Canonical rule: stock at or below zero deactivates; restock above zero reactivates unless the product is soft-deleted.
+- `ProductService.Update()` used `== 0`; it now uses `<= 0` to match `OrderService`. The change is behavior-preserving: `Product.Stock` carries `[Range(0, 999999)]` so validation rejects negative stock before the rule runs, and `PlaceOrder()` throws on insufficient stock before decrementing, so stock never goes below zero through any service path.
+- The characterization tests pin this with `Update_WithNegativeStock_ThrowsValidationException` and cover both deactivation paths and the `!IsDeleted` reactivation guard.
+- Catalog takes ownership of this rule unchanged in Phase 3.
+
 Facts to preserve in tests:
 
 - `PlaceOrder()` decrements stock and may deactivate products.
