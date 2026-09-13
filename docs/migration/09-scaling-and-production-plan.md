@@ -19,10 +19,17 @@ keys in Frontend, and single-writer SQLite files in Catalog and Orders.
 
 - Every phase is demonstrable locally before the next begins.
 - No big-bang cutover; each phase has a rollback boundary.
-- The existing wire-level verification is the parity net: the 10 HTTP
-  characterization facts, the 18-check failure suite, and the smoke suite are
-  provider- and topology-agnostic. They run unchanged against Postgres, a
-  gateway, or a container stack.
+- The verification net is real but partial, and the plan says exactly where it
+  ends. The 10 HTTP characterization facts and the smoke suite (BaseUrl is a
+  parameter) are wire-level: they run unchanged against Postgres, a gateway,
+  or a container stack. The 18-check failure suite is host-bound in three
+  mechanisms - it kills services by host port, restarts them with local
+  dotnet, and asserts correlation by reading fixed log file paths - so it
+  follows the stack into containers only after Phase 3 abstracts those
+  mechanisms. And all of it is sequential: none of it can see the concurrency
+  regressions Phase 2 makes possible. Phase 0 therefore adds a
+  concurrent-reserve fact, and Phase 2 does not start until it passes on the
+  current stack; without it, Phases 2 through 5 run without a net.
 - Nothing is added ahead of a need it demonstrably serves. The deferred list
   from plan 08 (gateway-as-product, outbox, event bus, circuit breakers,
   read-model service) stays deferred unless a phase here justifies it.
@@ -39,9 +46,24 @@ keys in Frontend, and single-writer SQLite files in Catalog and Orders.
   could not decrypt what the first instance protected.
 - Catalog and Orders state: SQLite in WAL mode at repo-root
   `App_Data/catalog.db` and `App_Data/orders.db`, seeded at startup if empty.
-  SQLite WAL permits concurrent readers but a single writer at a time; under
-  write load each service serializes on its file. This is the first capacity
-  ceiling, and it exists before instance count matters at all.
+  SQLite WAL permits concurrent readers but a single writer at a time. That is
+  the first capacity ceiling - and it is also the only thing making reserve
+  correct. Catalog's reserve path is a read-check-decrement with no row lock
+  (`db.Products.Find`, guard, `Stock -= quantity`); it cannot interleave
+  today only because writes serialize on the file. The same applies to the
+  idempotency key check, which is check-then-insert (`Find(key) != null`
+  before insert). Replacing SQLite without replacing those two shapes trades
+  a ceiling for an oversell bug; Phase 2 treats them as the primary work.
+- Both services run `Database.Migrate()` and seed-if-empty on every startup
+  (Catalog and Orders `Program.cs`). Correct for one instance per database; a
+  duplicate-object failure and a double seed for two. Frontend already gates
+  its migrations behind a `Database:Migrate` flag defaulting to false - the
+  services have no such gate, and Phase 2 adds one.
+- Health endpoints: Catalog and Orders expose `/health`; Frontend has none,
+  though Phases 3, 4, and 6 all depend on one existing and meaning something.
+- Frontend opens a browser window on startup when the environment is
+  Development (`Process.Start` in `Program.cs`). Fine on a desktop; a startup
+  hang in a container. Phase 3 gates it on an explicit setting.
 - Frontend to services: `ServiceHttp` with a 2s timeout, 2-minute connection
   pool lifetime, GET-only bounded retry; single `BaseUrl` per service from
   appsettings (`Services:Products:BaseUrl`, `Services:Orders:BaseUrl`). No
@@ -111,11 +133,18 @@ Steps:
 3. Demonstrate the SQLite write ceiling explicitly: concurrent place-order
    load against Orders, watch write serialization and any `database is locked`
    behavior in the logs. This is the number Phase 2 has to beat.
-4. Record cold-start time for Frontend (observed ~10-15s ASPX compilation);
+4. Add the concurrent-reserve correctness fact: N parallel reserve requests
+   for one product holding stock N must yield exactly N successes, stock 0,
+   and no negative stock. Run it against the current SQLite stack and record
+   it as the fact that must survive Phase 2. The existing suites are
+   sequential and structurally blind to this class of bug - this test is the
+   only thing standing between Phase 2 and a silent oversell regression.
+5. Record cold-start time for Frontend (observed ~10-15s ASPX compilation);
   Phase 6 readiness probes must account for it.
 
 Exit criteria: a `load/` directory with the scenarios, a results file with the
-baseline numbers, and the write-ceiling observation written down.
+baseline numbers, the write-ceiling observation, and the concurrent-reserve
+fact passing on SQLite.
 
 Rollback: none needed; measurement only.
 
@@ -135,38 +164,80 @@ Steps:
 3. Prove it: run Redis (container or `memurai` on Windows), run two Frontend
    instances on different ports against one Catalog/Orders pair, add an item
    to the cart on instance A, continue the wizard on instance B.
+4. Add Frontend `/health`, split in two from the start: liveness means the
+   process is up; readiness means the first ASPX compilation has completed,
+   verified by self-requesting a real page once (or hooking compile
+   completion) - not a static ok. A readiness endpoint that answers 200
+   before the ~10-15s compile lets the gateway route to a cold instance,
+   which is the cold-start storm from the risk register arriving through the
+   health endpoint itself. Compose checks, gateway active health checks, and
+   Kubernetes probes all consume this split.
 
-Exit criteria: cart and session survive an instance switch; failure suite and
-smoke green on the single-instance configuration.
+Exit criteria: cart and session survive an instance switch; a form page
+rendered by instance A accepts its postback POSTed to instance B (ViewState
+and the DataProtection key ring, not just session - this fails today and
+passes only when the key ring is genuinely shared); readiness stays false
+until first compile on a fresh instance; failure suite and smoke green on the
+single-instance configuration.
 
 Rollback: unset `Session:Redis`; the memory cache path is the fallback.
 
 ### Phase 2 - PostgreSQL for Catalog and Orders
 
-Goal: multiple writers, real concurrency, managed-service options.
+Goal: multiple writers, real concurrency, managed-service options - without
+losing the correctness SQLite's single writer was accidentally providing.
 
 Steps:
 
-1. Add `Npgsql.EntityFrameworkCore.PostgreSQL`; make the provider a
-   configuration choice (`Database:Provider` = `sqlite` | `postgres`) with
-   separate migration assemblies per provider. Follow the Phase 6 precedent:
-   fresh `InitialCreate` per provider rather than trying to subset or rewrite
-   the SQLite migration history.
-2. Mind the semantic differences called out in advance: string case-sensitivity
-   in queries and unique indexes (product names, reservation keys), decimal
-   and DateTime mapping, boolean columns, and `DateTime.UtcNow` defaults.
-   The reservation and release key tables get real unique constraints.
-3. Data copy: extend the `DbSplit` tool pattern with a `DbCopy` mode that
+1. Concurrency control first, because the unlocked read-check-decrement in
+   reserve (`db.Products.Find` -> guard -> `Stock -= quantity`) and the
+   check-then-insert on reservation and release keys are safe today only
+   under SQLite's serialized writes. Under Postgres READ COMMITTED, two
+   concurrent reserves of the same product both read Stock 5, both pass the
+   guard, both decrement: oversell. Decide and write down the locking
+   approach: `SELECT ... FOR UPDATE` via raw SQL in the reserve and release
+   loops, or EF `xmin` concurrency tokens with a bounded retry on conflict.
+   Not left to default isolation levels.
+2. Key inserts under contention: with the unique constraints in place, a
+   replayed reserve or release that races its first delivery raises a unique
+   violation instead of returning `replayed: true`. Catch the unique
+   violation on `ReservationKeys` / `ReleaseKeys` inserts and return the
+   replay response - the wire fact the characterization suite pins.
+3. Provider switch: add `Npgsql.EntityFrameworkCore.PostgreSQL`; make the
+   provider a configuration choice (`Database:Provider` = `sqlite` |
+   `postgres`). This touches the `AppDbContext` constructor and
+   `OnConfiguring` in both services - today they are registered with a file
+   path, not a connection string (`new AppDbContext(dbPath)`, Catalog and
+   Orders `Program.cs`), so the ctor grows a connection-string form. Follow
+   the Phase 6 precedent: fresh `InitialCreate` per provider rather than
+   trying to subset or rewrite the SQLite migration history.
+4. Retire the startup migration race while the provider is open: move both
+   services to a `Database:Migrate` flag defaulting to false (the pattern
+   Frontend already uses) plus a migrator entrypoint that applies migrations
+   and seeds once, under a lock, before replicas exist. Two instances racing
+   `Migrate()` on Postgres fail on duplicate objects; racing the seed check
+   double-seeds. This is the fix Phase 5 would otherwise discover late.
+5. The remaining semantic differences are real but secondary to the above:
+   string case-sensitivity in queries and unique indexes (product names,
+   reservation keys), decimal and DateTime mapping, boolean columns. The
+   reservation and release key tables get real unique constraints.
+6. Data copy: extend the `DbSplit` tool pattern with a `DbCopy` mode that
    reads the SQLite files and writes Postgres, using the ProductId resolution
    approach already proven there. Backup both SQLite files first, as in
    Phase 6.
-4. Verification: the 10 HTTP characterization facts and the smoke suite run
-   unchanged against the Postgres-backed services; the Phase 0 write scenario
-   re-run to quantify the concurrency gain.
+7. Verification: the 10 HTTP characterization facts and the smoke suite run
+   unchanged against the Postgres-backed services; the concurrent-reserve
+   fact from Phase 0 re-run - N parallel reserves of a stock-N product, on
+   Postgres, expecting exactly N successes, stock 0, no negatives (with one
+   Catalog instance this already interleaves on the thread pool; Phase 5
+   re-runs it across replicas); the Phase 0 write scenario re-run to
+   quantify the concurrency gain.
 
-Exit criteria: all suites green on Postgres; write ceiling measurably raised;
-SQLite remains runnable as the local default or is retired explicitly with a
-recorded decision.
+Exit criteria: concurrent-reserve fact green on Postgres; replayed-key
+responses under a raced replay; all suites green; write ceiling measurably
+raised; migrations and seeding run via the migrator entrypoint, not at
+service startup; SQLite remains runnable as the local default or is retired
+explicitly with a recorded decision.
 
 Rollback: config flip back to the sqlite provider and the untouched files
 until the Postgres run is verified; after data diverges, rollback is a data
@@ -183,16 +254,37 @@ Steps:
    inside the build), `aspnet:9.0` runtime stage running the publish output.
    The published-local proof from the previous plan is the evidence this
    works; watch image size (SDK stage keeps the ASPX compiler out of the
-   runtime image).
+   runtime image). Gate Frontend's startup browser launch on an explicit
+   setting, not the environment name - `Process.Start` under Development in
+   a container throws or hangs startup.
 2. `compose.yaml`: postgres, redis, gateway placeholder, 1x frontend,
-   1x catalog, 1x orders; health checks on `/health`; configuration by
-   environment variables only (URLs, connection strings, base URLs); logs to
-   stdout (the file logger stays but is no longer the primary source).
-3. Smoke suite and failure suite run against the composed stack with
+   1x catalog, 1x orders; health checks on `/health` (Frontend's readiness
+   from Phase 1); configuration by environment variables only (URLs,
+   connection strings, base URLs); logs to stdout. Two logging changes, not
+   one: Frontend writes through a `TextWriterTraceListener` while Catalog
+   and Orders use their `FileLoggerProvider`.
+3. Exposure rule, enforced in the file and checked in exit criteria:
+   containers must bind `0.0.0.0` internally, but every port published to
+   the host is written `127.0.0.1:PORT:PORT` - never bare `PORT:PORT`, which
+   publishes on all host interfaces and puts unauthenticated product and
+   order write endpoints on the LAN, reaching the condition Phase 7 exists
+   to prevent, three phases early and silently. Only the gateway/frontend
+   port is published at all; Catalog and Orders stay on the compose-internal
+   network with no host publish.
+4. Make the failure suite topology-agnostic. Abstract kill and start behind
+   a provider: local keeps the current port-kill and `dotnet <dll>` restarts,
+   compose uses `docker compose stop/start <service>`. Move the correlation
+   assertions off log-file reads and onto the `X-Correlation-ID` response
+   header - both services already echo it, and a header assertion is the
+   only version that survives N replicas and stdout logs at Phase 8.
+5. Smoke suite and failure suite run against the composed stack with
    `BaseUrl` pointed at the gateway/frontend port.
 
-Exit criteria: `docker compose up` gives a green smoke run on a clean
-machine state; no hardcoded localhost anywhere in container configuration.
+Exit criteria: `docker compose up` gives a green smoke run and a green
+failure suite (via the provider abstraction) on a clean machine state; no
+hardcoded localhost anywhere in container configuration; a published-port
+check confirms every host binding is loopback-only and Catalog/Orders have
+none.
 
 Rollback: the stack runs the same binaries outside containers; compose is
 additive.
@@ -217,7 +309,11 @@ Steps:
    domains of Frontend and the services separate and needs no internal
    proxy hop. The alternative (routing internal calls through the gateway)
    is recorded as rejected-for-now: it couples Frontend's availability to a
-   second hop with no demonstrated need.
+   second hop with no demonstrated need. Scope note: this mechanism is
+   compose-era. Phase 6 replaces it with a single Kubernetes Service DNS
+   name per backend - a static endpoint list goes stale against pod IPs that
+   churn on every scale event, so the platform takes over and the
+   multi-endpoint code is retired rather than carried forward.
 4. Correlation IDs pass through the gateway unchanged (it logs them too).
 
 Exit criteria: browser traffic lands on both frontend replicas in a
@@ -237,9 +333,11 @@ Steps:
    routing.
 2. Correctness checks that only matter with replicas: cart continuity
    across instances (Phase 1 work), reserve replay dedupe with both Orders
-   replicas writing to the shared key tables, correlation IDs traceable
-   across which-instance-served-what, and the degrade/restart behavior from
-   the failure suite applied per-replica (kill one catalog replica: no
+   replicas writing to the shared key tables, the concurrent-reserve fact
+   re-run across both replicas (the oversell test, now genuinely
+   multi-instance), correlation IDs traceable across
+   which-instance-served-what, and the degrade/restart behavior from the
+   failure suite applied per-replica (kill one catalog replica: no
    user-visible failure; kill all: the existing degradation, not a hang).
 3. Re-run the Phase 0 load scenarios against the scaled stack; compare
    throughput to the single-instance baseline.
@@ -257,16 +355,26 @@ Steps:
 
 1. Move from compose (static `--scale`) to Kubernetes. Start local:
    `kind` or Docker Desktop's cluster. Deployment per service plus gateway;
-   readiness and liveness probes on `/health` with `initialDelaySeconds`
-   sized to the Frontend cold start, or better, a startup probe.
-2. HPA per service on CPU (start: 60% target) with sensible min/max: min 2
+   readiness and liveness probes on `/health` (Frontend's Phase 1 split)
+   with `initialDelaySeconds` sized to the Frontend cold start, or better,
+   a startup probe. The same exposure rule as Phase 3 applies: NodePort
+   services and `kubectl port-forward` are loopback-only until Phase 7
+   completes - a NodePort binds on every node interface by default.
+2. Collapse the Phase 4 internal balancing: Frontend's service BaseUrls
+   become the single k8s Service DNS name for each backend; the Service
+   load-balances across healthy pods and the multi-endpoint client code is
+   retired.
+3. Migrations on the platform: the Phase 2 migrator entrypoint runs as a
+   pre-deploy Job (one runner, lock held, gate the deployments on its
+   success) so replica count never races a migration or a seed.
+4. HPA per service on CPU (start: 60% target) with sensible min/max: min 2
    for frontend (cold-start and availability), min 2 for catalog and orders
    (write availability), max set by the load tests, not optimism.
-3. Graceful shutdown: SIGTERM handling so Orders can finish or compensate an
+5. Graceful shutdown: SIGTERM handling so Orders can finish or compensate an
    in-flight reserve before a scale-down event reaps it; termination grace
    period sized to the slowest reserve+insert path (measured, not guessed).
    PodDisruptionBudgets so scale-down never takes the last replica.
-4. ConfigMaps and Secrets replace env-file values; the secrets policy from
+6. ConfigMaps and Secrets replace env-file values; the secrets policy from
    the repo's shared conventions applies (nothing in git).
 
 Exit criteria: a load ramp grows replicas and a load drop shrinks them, on
@@ -289,7 +397,11 @@ Steps:
 1. Authenticate at the edge: OIDC (any IdP - Entra ID, Keycloak, Auth0) with
    cookie sessions for browser flows at the gateway, and JWT bearer
    validation for the API paths. Services stay on the internal network and
-   accept traffic only from the gateway.
+   accept traffic only from the gateway and Frontend - Frontend calls the
+   services directly by the Phase 4 design, so "gateway only" would be a
+   contradiction, and the internal boundary is a network-policy concern
+   (compose networks now, NetworkPolicies at Phase 6), not an application
+   one.
 2. Authorization: at minimum an authenticated-users policy on write
    endpoints (product create/update/delete, order writes); read paths can
    stay public if the product wants a public catalog - decide and record.
@@ -333,15 +445,14 @@ Goal: day-2 reality written down.
 
 Steps:
 
-1. EF migrations under replicas: run as a pre-deploy Job with a lock (or the
-   platform's equivalent) so exactly one replica migrates; deployments wait
-   on its success.
+1. Deployment pipeline: build containers from the merged branch, run the
+   HTTP characterization tests, the concurrent-reserve fact, and the
+   (topology-abstracted) failure suite against a composed environment as CI
+   gates, push images, deploy - with the Phase 2 migrator wired as the
+   pre-deploy step the platform schedules.
 2. Backups: replace the SQLite file-copy procedure with `pg_dump` schedules
    or managed PITR; test an actual restore, not the backup file's existence.
-3. Deployment pipeline: build containers from the merged branch, run the
-   HTTP characterization tests and failure suite against a composed
-   environment as CI gates, push images, deploy.
-4. Runbook: reseed-equivalent for Postgres, scale overrides, the
+3. Runbook: reseed-equivalent for Postgres, scale overrides, the
    kill-a-replica diagnosis flow, correlation-ID trace walkthrough.
 
 Exit criteria: a restore actually performed; a deploy actually executed end
@@ -349,10 +460,23 @@ to end once; the runbook followed by someone who did not write it.
 
 ## Risk register
 
+- Bare port publishing is a default-behavior trap, not a one-time oversight:
+  `ports: - "8081:8080"` in compose publishes on every host interface, and a
+  NodePort binds on every node - either one puts unauthenticated product and
+  order write endpoints on the network before Phase 7 exists. Phase 3
+  exit-checks loopback-prefixed bindings and unpublished services; Phase 6
+  restates it for NodePort and port-forward.
+- The unlocked read-check-decrement and the key TOCTOU are invisible to every
+  sequential test in the repo. The concurrent-reserve fact is the only guard
+  against Phase 2 trading SQLite's accidental serialization for an oversell
+  bug, which is why Phase 2 is gated on it passing first on SQLite, then on
+  Postgres, then across replicas at Phase 5.
 - ASPX runtime compilation in containers: the published-local runs prove the
   binaries execute, but image size, feed access inside builds, and the ~10-15s
   cold start are real. Phase 3 exists to surface this before anything depends
-  on it; Phase 6 compensates with startup probes and min replicas.
+  on it; the Phase 1 readiness split plus Phase 6 startup probes and min
+  replicas compensate. A readiness endpoint that answers 200 before first
+  compile re-creates the cold-start storm through the health check itself.
 - Postgres semantic drift: case-sensitive string behavior and unique index
   semantics are the likeliest silent behavior changes; the characterization
   facts and the seed-compare discipline from the previous plan are the net.
@@ -360,9 +484,6 @@ to end once; the runbook followed by someone who did not write it.
   CI builds. Mirror or vendor the SDK packages once Phase 3 works.
 - net9-only SDK pin: the previous plan documented the .NET 10 block; base
   images and the SDK pin must move together when upstream unblocks.
-- Autoscale cold-start storms: a load spike plus 15s per new Frontend replica
-  can queue users; min replicas and startup probes are the mitigation, and
-  the Phase 0 numbers size them.
 - Scale-down in the middle of reserve/release: Phase 6's graceful shutdown
   work is the guard; the compensation release path already exists and is
   tested, this extends it to shutdown.
