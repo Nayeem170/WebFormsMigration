@@ -37,6 +37,7 @@ This guide is based on the actual migration of the **LegacyWebForms** inventory 
 | 5 | ASPX pages — Bind to typed Container.DataItem cast, remove unsupported controls | [Phase 5](05-aspx-pages.md) |
 | 6 | Static files, routing, middleware pipeline | [Phase 6](06-static-files-routing.md) |
 | 7 | Microservices migration - local-only three-service plan | [Plan](08-microservices-migration.md) |
+| 8 | Scaling and production - routing, replicas, autoscaling, Postgres, auth | [Plan](09-scaling-and-production-plan.md) |
 
 ## Prerequisites
 
