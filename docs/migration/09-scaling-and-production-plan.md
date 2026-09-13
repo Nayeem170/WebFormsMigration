@@ -1,7 +1,7 @@
 # Scaling and Production Plan for the Inventory Stack
 
-Status: Phase 0 complete (2026-09-14; execution record in Phase 0). Phases 1+
-not started. This plan picks up where
+Status: Phases 0-1 complete (2026-09-14; execution records in each phase).
+Phases 2+ not started. This plan picks up where
 [08-microservices-migration.md](08-microservices-migration.md) ended: three
 services, two SQLite files, one UI tree, loopback only, no auth, every process
 started by hand. It answers three questions that the local plan deliberately
@@ -236,6 +236,67 @@ until first compile on a fresh instance; failure suite and smoke green on the
 single-instance configuration.
 
 Rollback: unset `Session:Redis`; the memory cache path is the fallback.
+
+Phase 1 execution record (2026-09-14):
+
+- Redis: `ccw-redis` container (redis:7-alpine), published
+  `127.0.0.1:16379` - host port 6379 sits in a Windows excluded port range,
+  and the loopback-only publish follows the plan's exposure rule. The
+  connection string must be the IPv4 literal: `localhost` resolves to `::1`
+  on this machine, the container publishes IPv4 only, and the first
+  start died at the multiplexer - fail-fast working as designed. Timeouts
+  set to 2000ms connect and sync, matching the stack's 2s ServiceHttp
+  budget; `AbortOnConnectFail=true` keeps startup loud when Redis is
+  required but down.
+- Key ring: `SetApplicationName("CoreWebForms.Frontend")` plus
+  `PersistKeysToStackExchangeRedis` is the mechanism that overrides the
+  per-content-root discriminator - load-bearing, not hygiene. The loud
+  fallback works: without `Session:Redis`, startup logs an error-level
+  "in-process memory cache" line unless `Session:UseMemoryCache` opts in.
+- Health: `/health/live` answers 200 once listening; `/health/ready`
+  returns 503 `{"status":"warming"}` until a one-shot background warm-up
+  compiles `/`, `/Pages/Products/`, and `/Pages/Orders/` (no per-probe
+  self-requests). Observed flip in ~6s warm-cache. Side discovery: the
+  warm-up must send a User-Agent - UA-less requests crash
+  `ValidationSummary` via `HttpCapabilitiesBase` (pre-existing quirk; a
+  UA-less load tool hitting the orders page triggers it too).
+- Before-state, from two distinct publish roots (`artifacts/phase1/
+  frontend-a` and `frontend-b`): the same-root control pair (two instances
+  of frontend-a on 8081/8083) already interoperate - shared
+  `%LOCALAPPDATA%` ring, same discriminator - proving the reviewer's
+  false-green warning. The distinct-root pair fails exactly as predicted:
+  session-cookie unprotect throws `CryptographicException`, ViewState MAC
+  validation fails, and the render aborts after headers - 200 with 0
+  bytes, mechanism named in the instance log.
+- After-state (`Session__Redis=127.0.0.1:16379` on both roots): the
+  cross-instance postback A->B returns 200 with the full 43615-byte body,
+  identical to same-instance; Redis holds both `ccw:<session-id>` entries
+  and the `DataProtection-Keys` ring. Readiness 503->200 verified on the
+  published instances.
+- Redis-down degradation (the decided shape: reads survive, cart path
+  degrades): dashboard and products pages never touch session and keep
+  serving full content. Getting the orders page clean took three
+  iterations, all recorded: a control-level catch alone is insufficient
+  because the adapters' session load fails soft to empty while any session
+  touch establishes one whose commit rethrows after response start (0-byte
+  abort), and the broken session state surfaces as
+  `NullReferenceException`, not `RedisException`, so the first filter
+  missed it. The final shape is proactive: `SessionState.StoreUnavailable`
+  (multiplexer `IsConnected`) gates `OrderWizard.Bind` away from session
+  entirely and renders the standard unavailable message, with the catch
+  broadened as backstop. Result: 200, message present, no stack trace,
+  order history still rendered; recovery after Redis restart with no
+  Frontend restart. Known limitation recorded: requests that already hold
+  a session cookie during an outage still hit the commit-abort path and
+  get a traceless blank - an adapters-level fix, out of this phase's
+  scope.
+- Verification: failure suite 22/22 in Redis mode (four new checks:
+  dashboard survives, products survive, orders degrades with message and
+  no trace, recovery after restart); 18/18 memory mode unchanged; 11/11
+  characterization facts; smoke green after reseed - the suite's probe
+  orders pushed a seed off the orders page once, the documented
+  reseed-before-smoke protocol applied. Session surface confirmed
+  single-key (`CartItems`) as predicted; no audit was spent there.
 
 ### Phase 2 - PostgreSQL for Catalog and Orders
 
