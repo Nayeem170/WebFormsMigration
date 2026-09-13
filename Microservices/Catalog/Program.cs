@@ -20,6 +20,10 @@ var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
+    var dbDir = Path.GetDirectoryName(dbPath);
+    if (!string.IsNullOrEmpty(dbDir))
+        Directory.CreateDirectory(dbDir);
+
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();
     db.Database.OpenConnection();
