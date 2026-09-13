@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.Diagnostics;
 using System.Linq;
 using Inventory.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Orders;
+using Orders.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,9 +21,34 @@ var dbPath = !string.IsNullOrEmpty(dbPathSetting)
 
 var catalogBaseUrl = builder.Configuration["Services:Catalog:BaseUrl"] ?? "http://localhost:8094";
 
+var logPath = Path.Combine(builder.Environment.ContentRootPath, "App_Data", "logs", "app.log");
+Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+builder.Logging.AddProvider(new FileLoggerProvider(logPath));
+
 builder.Services.AddScoped<AppDbContext>(_ => new AppDbContext(dbPath));
 
 var app = builder.Build();
+
+app.Use(async (context, next) =>
+{
+    var incoming = context.Request.Headers[CorrelationHeader.Name].ToString();
+    var correlationId = string.IsNullOrWhiteSpace(incoming)
+        ? Guid.NewGuid().ToString("N")
+        : incoming;
+    context.Items[CorrelationHeader.Name] = correlationId;
+    context.Response.Headers[CorrelationHeader.Name] = correlationId;
+    var stopwatch = Stopwatch.StartNew();
+    try
+    {
+        await next(context);
+    }
+    finally
+    {
+        app.Logger.LogInformation("HTTP {Method} {Path} -> {StatusCode} in {Elapsed}ms corr={CorrelationId}",
+            context.Request.Method, context.Request.Path, context.Response.StatusCode,
+            stopwatch.ElapsedMilliseconds, correlationId);
+    }
+});
 
 using (var scope = app.Services.CreateScope())
 {
@@ -74,11 +101,12 @@ app.MapGet("/api/orders/{id:int}/items", (int id, AppDbContext db) =>
     return Results.Ok(items.Select(ToItemDto).ToList());
 });
 
-app.MapPost("/api/orders", (OrderDto dto, AppDbContext db) =>
+app.MapPost("/api/orders", (OrderDto dto, HttpContext http, AppDbContext db) =>
 {
     var invalid = ValidateOrder(dto);
     if (invalid != null) return invalid;
 
+    var correlationId = http.Items[CorrelationHeader.Name] as string;
     var reservationKey = Guid.NewGuid().ToString("N");
     var stockItems = dto.Items
         .Select(i => new StockItemDto { ProductId = i.ProductId, Quantity = i.Quantity })
@@ -90,13 +118,13 @@ app.MapPost("/api/orders", (OrderDto dto, AppDbContext db) =>
         {
             ReservationKey = reservationKey,
             Items = stockItems
-        });
+        }, correlationId);
     }
     catch (CatalogRuleException ex)
     {
         return Results.Json(new ApiErrorResponse { ErrorCode = ex.ErrorCode, Message = ex.Message }, statusCode: 409);
     }
-    catch (HttpRequestException ex)
+    catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
     {
         app.Logger.LogError(ex, "Reserve failed after retries for reservation {ReservationKey}", reservationKey);
         return Results.Json(
@@ -119,7 +147,7 @@ app.MapPost("/api/orders", (OrderDto dto, AppDbContext db) =>
             {
                 ReleaseKey = "reserve:" + reservationKey,
                 Items = stockItems
-            });
+            }, correlationId);
         }
         catch (Exception releaseEx)
         {
@@ -156,7 +184,7 @@ app.MapPut("/api/orders/{id:int}/status", (int id, UpdateStatusRequest request, 
     return Results.NoContent();
 });
 
-app.MapDelete("/api/orders/{id:int}", (int id, AppDbContext db) =>
+app.MapDelete("/api/orders/{id:int}", (int id, HttpContext http, AppDbContext db) =>
 {
     var order = db.Orders.Include(o => o.Items).FirstOrDefault(o => o.Id == id);
     if (order == null || order.IsDeleted)
@@ -173,7 +201,7 @@ app.MapDelete("/api/orders/{id:int}", (int id, AppDbContext db) =>
             Items = order.Items
                 .Select(i => new StockItemDto { ProductId = i.ProductId, Quantity = i.Quantity })
                 .ToList()
-        });
+        }, http.Items[CorrelationHeader.Name] as string);
     }
     catch (Exception ex)
     {

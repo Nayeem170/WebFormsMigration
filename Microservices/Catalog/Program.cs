@@ -1,5 +1,7 @@
 using System.ComponentModel.DataAnnotations;
+using System.Diagnostics;
 using Catalog;
+using Catalog.Logging;
 using Inventory.Contracts;
 using Microsoft.EntityFrameworkCore;
 
@@ -7,6 +9,10 @@ var builder = WebApplication.CreateBuilder(args);
 
 var urls = builder.Configuration["Urls"] ?? "http://localhost:8094";
 builder.WebHost.UseUrls(urls);
+
+var logPath = Path.Combine(builder.Environment.ContentRootPath, "App_Data", "logs", "app.log");
+Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+builder.Logging.AddProvider(new FileLoggerProvider(logPath));
 
 var dbPathSetting = builder.Configuration["Database:Path"];
 var dbPath = !string.IsNullOrEmpty(dbPathSetting)
@@ -17,6 +23,27 @@ var dbPath = !string.IsNullOrEmpty(dbPathSetting)
 builder.Services.AddScoped<AppDbContext>(_ => new AppDbContext(dbPath));
 
 var app = builder.Build();
+
+app.Use(async (context, next) =>
+{
+    var incoming = context.Request.Headers[CorrelationHeader.Name].ToString();
+    var correlationId = string.IsNullOrWhiteSpace(incoming)
+        ? Guid.NewGuid().ToString("N")
+        : incoming;
+    context.Items[CorrelationHeader.Name] = correlationId;
+    context.Response.Headers[CorrelationHeader.Name] = correlationId;
+    var stopwatch = Stopwatch.StartNew();
+    try
+    {
+        await next(context);
+    }
+    finally
+    {
+        app.Logger.LogInformation("HTTP {Method} {Path} -> {StatusCode} in {Elapsed}ms corr={CorrelationId}",
+            context.Request.Method, context.Request.Path, context.Response.StatusCode,
+            stopwatch.ElapsedMilliseconds, correlationId);
+    }
+});
 
 using (var scope = app.Services.CreateScope())
 {

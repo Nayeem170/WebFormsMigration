@@ -7,20 +7,26 @@ namespace CoreWebForms.Core
     {
         public void Info(string message)
         {
-            Trace.TraceInformation(message);
+            Trace.TraceInformation(Prefix(message));
         }
 
         public void Warning(string message)
         {
-            Trace.TraceWarning(message);
+            Trace.TraceWarning(Prefix(message));
         }
 
         public void Error(string message, Exception? ex = null)
         {
             if (ex != null)
-                Trace.TraceError("{0} | {1}", message, ex.ToString());
+                Trace.TraceError("{0} | {1}", Prefix(message), ex.ToString());
             else
-                Trace.TraceError(message);
+                Trace.TraceError(Prefix(message));
+        }
+
+        private static string Prefix(string message)
+        {
+            var id = Services.Correlation.TryCurrent();
+            return id == null ? message : string.Format("[corr {0}] {1}", id, message);
         }
     }
 }

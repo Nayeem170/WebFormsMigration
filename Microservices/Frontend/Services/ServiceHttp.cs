@@ -1,6 +1,7 @@
 using System;
 using System.Net.Http;
 using System.Threading;
+using Inventory.Contracts;
 
 namespace CoreWebForms.Services
 {
@@ -21,7 +22,9 @@ namespace CoreWebForms.Services
             {
                 try
                 {
-                    return _client.Send(requestFactory());
+                    var request = requestFactory();
+                    request.Headers.Add(CorrelationHeader.Name, Correlation.Current());
+                    return _client.Send(request);
                 }
                 catch (HttpRequestException) when (retryOnFailure && attempt < maxAttempts)
                 {

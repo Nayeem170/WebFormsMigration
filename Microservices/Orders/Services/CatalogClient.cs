@@ -5,8 +5,7 @@ using System.Text.Json;
 using System.Threading;
 using Inventory.Contracts;
 
-namespace Orders
-{
+namespace Orders{
     public class CatalogRuleException : Exception
     {
         public string ErrorCode { get; }
@@ -27,21 +26,26 @@ namespace Orders
         };
         private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
 
-        public static void Reserve(string baseUrl, ReserveStockRequest request)
-            => SendStockCall(baseUrl.TrimEnd('/') + "/api/products/reserve", request);
+        public static void Reserve(string baseUrl, ReserveStockRequest request, string? correlationId = null)
+            => SendStockCall(baseUrl.TrimEnd('/') + "/api/products/reserve", request, correlationId);
 
-        public static void Release(string baseUrl, ReleaseStockRequest request)
-            => SendStockCall(baseUrl.TrimEnd('/') + "/api/products/release", request);
+        public static void Release(string baseUrl, ReleaseStockRequest request, string? correlationId = null)
+            => SendStockCall(baseUrl.TrimEnd('/') + "/api/products/release", request, correlationId);
 
-        private static void SendStockCall(string url, object request)
+        private static void SendStockCall(string url, object request, string? correlationId)
         {
             for (var attempt = 1; ; attempt++)
             {
                 try
                 {
-                    using var content = new StringContent(
-                        JsonSerializer.Serialize(request, _jsonOptions), Encoding.UTF8, "application/json");
-                    using var response = _client.PostAsync(url, content).GetAwaiter().GetResult();
+                    using var message = new HttpRequestMessage(HttpMethod.Post, url)
+                    {
+                        Content = new StringContent(
+                            JsonSerializer.Serialize(request, _jsonOptions), Encoding.UTF8, "application/json")
+                    };
+                    if (!string.IsNullOrEmpty(correlationId))
+                        message.Headers.Add(CorrelationHeader.Name, correlationId);
+                    using var response = _client.Send(message);
                     if (response.IsSuccessStatusCode)
                         return;
                     var body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();

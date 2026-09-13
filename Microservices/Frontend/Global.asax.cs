@@ -5,6 +5,13 @@ namespace CoreWebForms
 {
     public class InventoryApp : HttpApplication
     {
+        void Application_EndRequest(object sender, EventArgs e)
+        {
+            if (Request == null || Response == null) return;
+            AppData.Services?.Log.Info(string.Format("HTTP {0} {1} -> {2}",
+                Request.HttpMethod, Request.RawUrl, Response.StatusCode));
+        }
+
         void Application_Error(object sender, EventArgs e)
         {
             var ex = Server.GetLastError();
