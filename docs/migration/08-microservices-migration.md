@@ -66,6 +66,14 @@ Steps:
 9. Decide the canonical inactive-stock rule; Catalog takes ownership in Phase 3.
 10. State that the Phase 0 characterization tests intentionally reference `CoreWebForms/CoreWebForms.csproj` from `Microservices/tests`.
 
+Spike result (2026-09-13, verified on this repo):
+
+- `CoreWebForms.csproj` with a `ProjectReference` to a plain `Microsoft.NET.Sdk` class library builds clean and copies the DLL to the output directory. `EnableRuntimeAspxCompilation` is not broken by the reference.
+- The runtime ASPX compiler does not reference the library automatically. Inline `<script runat="server">` code using a library type fails with CS0103 and the page serves a compiler-diagnostics payload instead of rendering.
+- Adding `<%@ Assembly Name="AssemblyName" %>` to the page fixes it; the page then compiles and renders the library output correctly.
+- Code-behind compiles at build time, so seam types consumed from code-behind need nothing extra. Only ASPX markup and inline script that touch library types need the directive.
+- Existing pages are unaffected: root and Products pages served 200 throughout the spike run.
+
 Facts to preserve in tests:
 
 - `PlaceOrder()` decrements stock and may deactivate products.
