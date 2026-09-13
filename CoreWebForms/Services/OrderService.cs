@@ -7,7 +7,7 @@ using CoreWebForms.Data;
 
 namespace CoreWebForms.Services
 {
-    public class OrderService
+    public class OrderService : IOrderService
     {
         private readonly IOrderRepository _repo;
         private readonly ILogger _log;

@@ -7,7 +7,7 @@ using CoreWebForms.Data;
 
 namespace CoreWebForms.Services
 {
-    public class ProductService
+    public class ProductService : IProductService
     {
         private readonly IProductRepository _repo;
         private readonly ILogger _log;

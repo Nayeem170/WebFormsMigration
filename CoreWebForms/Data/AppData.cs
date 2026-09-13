@@ -53,8 +53,8 @@ namespace CoreWebForms
 
     public class ServiceContainer
     {
-        public ProductService Products { get; }
-        public OrderService Orders { get; }
+        public IProductService Products { get; }
+        public IOrderService Orders { get; }
         public ILogger Log { get; }
 
         public ServiceContainer(IProductRepository productRepo, IOrderRepository orderRepo, ILogger logger)

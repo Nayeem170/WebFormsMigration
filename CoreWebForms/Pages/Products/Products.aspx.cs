@@ -9,7 +9,7 @@ namespace CoreWebForms
 {
     public partial class ProductsPage : AppPage
     {
-        private readonly ProductService _products = AppData.Services.Products;
+        private readonly IProductService _products = AppData.Services.Products;
 
         protected void Page_Load(object sender, EventArgs e)
         {
