@@ -183,7 +183,7 @@ Steps:
 3. Expose HTTP endpoints for product list, lookup, add, edit, delete, and `/health`.
 4. Move product reads and writes into Catalog.
 5. Move product activation logic into Catalog for product CRUD paths only.
-6. Remove product CRUD from the monolith; order-driven stock mutation stays in `OrderService` until Phase 4.
+6. Stop calling product CRUD in the monolith: `Services:Products:Mode` defaults to `Http`. The in-process arm stays intact as the rollback path and is deleted only in Phase 8. Order-driven stock mutation stays in `OrderService` until Phase 4.
 7. Keep the shared SQLite file at a repo-root-anchored absolute path so both processes open the same file.
 8. Route product pages through HTTP behind the interface seam.
 9. Run only one process with migrations enabled during the shared-DB phase.
@@ -204,14 +204,25 @@ Rules for this phase:
 
 Exit criteria:
 
- - Product pages use Catalog through HTTP.
- - Catalog is the only writer for product CRUD state.
- - The monolith can still start against the shared database after Catalog has migrated and seeded it.
- - The shared DB still allows a rollback to the monolith if needed.
- - Source-run and published-local smoke tests pass for the product flow.
- - Rollback means flip the Phase 1 config switch back to in-process implementations and stop the services.
+- Product pages use Catalog through HTTP.
+- Catalog is the only writer for product CRUD state.
+- The monolith can still start against the shared database after Catalog has migrated and seeded it.
+- The shared DB still allows a rollback to the monolith if needed.
+- Source-run and published-local smoke tests pass for the product flow.
+- Rollback means flip `Services:Products:Mode` back to `InProcess` and stop the services.
 
 During Phase 5 parity verification only, the shared-database smoke tests exercise both `CoreWebForms` and `Microservices/Frontend` against the same repo-root-anchored database path.
+
+Phase 3 execution record (2026-09-13):
+
+- Catalog lives at `Microservices/Catalog` (plain `Microsoft.NET.Sdk.Web`) with `AppDbContext`, the three models, `AppConstants`, `DbSeeder`, and all three migration files copied in and namespace-swapped to `Catalog.*`. The migration IDs are unchanged, so the shared file's `__EFMigrationsHistory` stays valid for both processes. Constraint recorded: no schema changes during Phase 3; anything schema-shaped waits for Phase 6.
+- Catalog owns `Migrate()`, seeding, and WAL at startup (`PRAGMA journal_mode=WAL` once, on the file). The monolith runs with `Database:Migrate` set to `false` and only opens the file. Both contexts set `Default Timeout=5` in the connection string, which is the per-connection busy timeout.
+- Config keys: `Database:Path` (absolute override, used by published runs), `Database:RelativePath` (repo-root-anchored: `../App_Data/inventory.db` from the monolith, `../../App_Data/inventory.db` from Catalog), `Services:Products:Mode` (`Http` by default now) and `Services:Products:BaseUrl`. The Phase 1 blanket `Services:Mode` key became the per-service `Services:Products:Mode` so orders can stay in-process until Phase 4; rollback is flipping the key back to `InProcess`.
+- Catalog endpoints: `GET /health`, `GET /api/products?includeDeleted=`, `GET /api/products/{id}` (404 on missing), `POST /api/products` (201, id in body; 400 with `ApiErrorResponse` on validation failure), `PUT /api/products/{id}` (204; applies the canonical `stock <= 0` deactivation rule server-side), `DELETE /api/products/{id}` (204, soft delete).
+- `HttpProductService` in the monolith implements `IProductService` over a single shared static `HttpClient`, maps `ProductDto` to `Product` internally, and throws `HttpRequestException` on any non-success (404 on `GetById` maps to `null`, which is a legitimate not-found signal).
+- Contention: `scripts/test-contention.ps1` ran 30 concurrent product writes across two Catalog processes against one file: 0 failures. This proves the file-level writer-vs-writer behavior under WAL plus busy timeout. The domain-true variant (monolith order placement racing a Catalog edit) is not reachable by script until Orders has an API in Phase 4; both sides use the identical connection settings, so the file-level proof covers the lock behavior.
+- Publish findings: `Content/` and `Scripts/` needed explicit `CopyToPublishDirectory` items (the SDK publishes `Pages/` and `Layout/` on its own). The published monolith must run with its publish directory as the working directory because `Program.cs` maps physical file providers against the content root.
+- Verified: Catalog serves all endpoints standalone; product pages render through the HTTP arm in both source-run and published-local configurations against the same shared file; the in-process arm stays green at 21/21.
 
 ### Phase 4 - Orders service and missing write port
 
