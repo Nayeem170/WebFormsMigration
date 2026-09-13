@@ -39,8 +39,10 @@ namespace CoreWebForms
 
             var contentRoot = app.Environment.ContentRootPath;
 
-            var dbRelativePath = builder.Configuration["Database:RelativePath"] ?? "App_Data/inventory.db";
-            var dbPath = Path.Combine(contentRoot, dbRelativePath);
+            var dbPathSetting = builder.Configuration["Database:Path"];
+            var dbPath = !string.IsNullOrEmpty(dbPathSetting)
+                ? dbPathSetting
+                : Path.Combine(contentRoot, builder.Configuration["Database:RelativePath"] ?? "App_Data/inventory.db");
             var serviceMode = ServiceMode.InProcess;
             var serviceModeText = builder.Configuration["Services:Mode"];
             if (!string.IsNullOrEmpty(serviceModeText) && !Enum.TryParse<ServiceMode>(serviceModeText, ignoreCase: true, out serviceMode))
