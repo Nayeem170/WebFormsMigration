@@ -117,6 +117,7 @@ Important note:
 
 - `OrderWizard` stores `List<OrderItem>` in session, and `Program.cs` registers `List<OrderItem>` under the `CartItems` key with the JSON session serializer.
 - Model types do not move to another assembly anywhere in this plan, so the session payload's registered type identity never changes and no compatibility window is needed.
+- `UpdateStatus` validates status and priority before the order lookup. Invalid values throw even when the order is missing or deleted; valid values on a deleted order are still silently rejected. This is pinned by tests and pre-lands the Phase 4 semantics, where the HTTP endpoint makes caller input unconstrained.
 
 Exit criteria:
 
@@ -145,6 +146,17 @@ Type ownership decision:
 - Markup cost of moving types is small but not zero: only `Products.aspx` binds model types inline (9 typed `Container.DataItem` casts to `CoreWebForms.Product`). Keeping models in place means those casts compile with no changes. The other markup files use late-bound `Eval`, which does not reference types at compile time either way.
 - The models carry EF persistence concerns (`IsDeleted`, `AddedDate`) that do not belong on a wire contract.
 - If markup ever must reference a Contracts type, add `<%@ Assembly Name="..." %>` to that page per the Phase 0 spike result.
+
+Contracts decisions (2026-09-13):
+
+- Contracts lives at `Microservices/Contracts` (assembly `Inventory.Contracts`) with a real `ProjectReference` from `CoreWebForms.csproj`. Nothing consumes it until Phase 3; the standing reference makes the build-layout proof permanent instead of resting on the deleted spike library.
+- DTO fields were derived from usage, not mirrored from the entities:
+  - `IsDeleted` is on the wire: the Products grid, the wizard product guard, and the orders table all render or filter on it.
+  - `AddedDate` is on the wire: `ProductDetail` displays it. The server still owns it on create.
+  - `CustomerEmail` and `Extras` are on the wire: the order confirmation reads both back.
+  - `OrderDto` embeds `Items`: `OrdersTable` binds `o.Items` directly and only falls back to `GetItems(orderId)` for uncached rows.
+- Error contract: `ApiErrorResponse` carries `ErrorCode` and `Message` for the log. All five page-level catch blocks show a fixed generic string and never surface `ex.Message`, so exception-type fidelity across HTTP is unnecessary. The binding rule is client-side: the HTTP arm must throw on any non-success response, never return null or a default, because those catch blocks are the entire user-visible error path.
+- `PagedResult<T>` is a transport shape only. The `IOrderService` interface stays frozen as mirrored in Phase 1; a Phase 3 HTTP implementation may serve `Count` and `GetPaged` from one `PagedResult<T>` response internally.
 
 Build concerns to prove early:
 
