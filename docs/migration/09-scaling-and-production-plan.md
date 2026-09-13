@@ -56,9 +56,13 @@ keys in Frontend, and single-writer SQLite files in Catalog and Orders.
   a ceiling for an oversell bug; Phase 2 treats them as the primary work.
 - Both services run `Database.Migrate()` and seed-if-empty on every startup
   (Catalog and Orders `Program.cs`). Correct for one instance per database; a
-  duplicate-object failure and a double seed for two. Frontend already gates
-  its migrations behind a `Database:Migrate` flag defaulting to false - the
-  services have no such gate, and Phase 2 adds one.
+  duplicate-object failure and a double seed for two. Frontend has a
+  `Database:Migrate` flag, but its code default is true (`?? true` in
+  `Program.cs`) with appsettings.json supplying the false - a config-file
+  guarantee, not a code one. Phase 3 moves configuration to environment
+  variables only, and a compose service that omits `Database__Migrate` gets
+  the racing behavior back. Phase 2 adds the flag to the services with the
+  default false in code.
 - Health endpoints: Catalog and Orders expose `/health`; Frontend has none,
   though Phases 3, 4, and 6 all depend on one existing and meaning something.
 - Frontend opens a browser window on startup when the environment is
@@ -106,7 +110,8 @@ keys in Frontend, and single-writer SQLite files in Catalog and Orders.
        | Catalog |   | Orders  |
        +----+----+   +----+----+
             |             |
-       [ PostgreSQL shared by both, own schemas ]   Phase 2
+       [ PostgreSQL - one instance two schemas, or two databases: ]  Phase 2
+       [              Phase 2 decides and records which            ]
        [ Redis: session cache + DataProtection keys ] Phase 1
 ```
 
@@ -133,18 +138,27 @@ Steps:
 3. Demonstrate the SQLite write ceiling explicitly: concurrent place-order
    load against Orders, watch write serialization and any `database is locked`
    behavior in the logs. This is the number Phase 2 has to beat.
-4. Add the concurrent-reserve correctness fact: N parallel reserve requests
-   for one product holding stock N must yield exactly N successes, stock 0,
-   and no negative stock. Run it against the current SQLite stack and record
-   it as the fact that must survive Phase 2. The existing suites are
-   sequential and structurally blind to this class of bug - this test is the
-   only thing standing between Phase 2 and a silent oversell regression.
+4. Add the concurrent-reserve fact as two separate assertions, because they
+   fail for different reasons. The invariant - no negative stock, no
+   oversell, no success beyond available stock, on any provider - is the
+   fact that must survive Phase 2 and gates it. The goal - exactly N of N
+   parallel reserves succeeding - is provider-dependent: on SQLite it holds
+   only while N stays under what the connection's 5-second busy timeout
+   absorbs (`Default Timeout=5` in both AppDbContext connection strings),
+   and past that point reserves fail with SQLITE_BUSY. A busy failure is a
+   recorded baseline characteristic feeding step 3's ceiling number, not a
+   red test; reporting it as correctness would make the strongest gate in
+   the plan its flakiest. Run both against the current SQLite stack. The
+   existing suites are sequential and structurally blind to this class of
+   bug - this test is the only thing standing between Phase 2 and a silent
+   oversell regression.
 5. Record cold-start time for Frontend (observed ~10-15s ASPX compilation);
   Phase 6 readiness probes must account for it.
 
 Exit criteria: a `load/` directory with the scenarios, a results file with the
-baseline numbers, the write-ceiling observation, and the concurrent-reserve
-fact passing on SQLite.
+baseline numbers, the write-ceiling observation, the concurrent-reserve
+invariant green on SQLite, and the N-success goal recorded alongside the N
+where SQLite's busy timeout starts failing it.
 
 Rollback: none needed; measurement only.
 
@@ -156,8 +170,12 @@ Steps:
 
 1. Add `Microsoft.Extensions.Caching.StackExchangeRedis`; replace
    `AddDistributedMemoryCache` with `AddStackExchangeRedisCache` pointed at a
-   configurable connection string (`Session:Redis`), defaulting back to the
-   memory cache when unset so local runs without Redis keep working.
+   configurable connection string (`Session:Redis`). The memory-cache
+   fallback must be loud, not silent: gate it on an explicit opt-in for
+   single-instance local runs (a separate `Session:UseMemoryCache` flag) or
+   log at error level when it activates. A container missing the Redis
+   variable would otherwise run N replicas on per-process session - broken
+   carts, nothing in the logs.
 2. Persist DataProtection keys to the same Redis
    (`PersistKeysToStackExchangeRedis`) so cookies and protected payloads
    survive instance switches. Set a stable application name.
@@ -196,8 +214,17 @@ Steps:
    concurrent reserves of the same product both read Stock 5, both pass the
    guard, both decrement: oversell. Decide and write down the locking
    approach: `SELECT ... FOR UPDATE` via raw SQL in the reserve and release
-   loops, or EF `xmin` concurrency tokens with a bounded retry on conflict.
-   Not left to default isolation levels.
+   loops, or EF `xmin` concurrency tokens. Not left to default isolation
+   levels. Whichever branch is chosen, two guards come with it. First, lock
+   ordering: reserve iterates request items in caller order, and the cart
+   makes that order user-controlled - two concurrent reserves, one [A, B]
+   and one [B, A], each hold their first row and wait on their second until
+   Postgres's deadlock detector kills one with 40P01, surfacing as an
+   unhandled 500 on a path that today only ever returns 200 or 409. Sort
+   items by ProductId before the lock loop, in both reserve and release, so
+   every transaction takes locks in the same order; that removes the class
+   rather than retrying it. Second, a bounded retry stays as the backstop
+   for serialization failures either branch can still raise.
 2. Key inserts under contention: with the unique constraints in place, a
    replayed reserve or release that races its first delivery raises a unique
    violation instead of returning `replayed: true`. Catch the unique
@@ -210,17 +237,28 @@ Steps:
    path, not a connection string (`new AppDbContext(dbPath)`, Catalog and
    Orders `Program.cs`), so the ctor grows a connection-string form. Follow
    the Phase 6 precedent: fresh `InitialCreate` per provider rather than
-   trying to subset or rewrite the SQLite migration history.
+   trying to subset or rewrite the SQLite migration history. Also decide and
+   record the schema topology: one instance with separate schemas per
+   service plus separate role grants (so Catalog's credentials cannot read
+   Orders tables), or two databases outright. The split files enforced the
+   service boundary physically; a shared instance without per-service
+   grants makes a cross-service join merely impolite. The choice also sets
+   `pg_dump` granularity for Phase 9 backups.
 4. Retire the startup migration race while the provider is open: move both
-   services to a `Database:Migrate` flag defaulting to false (the pattern
-   Frontend already uses) plus a migrator entrypoint that applies migrations
-   and seeds once, under a lock, before replicas exist. Two instances racing
-   `Migrate()` on Postgres fail on duplicate objects; racing the seed check
-   double-seeds. This is the fix Phase 5 would otherwise discover late.
+   services to a `Database:Migrate` flag whose code default is false
+   (Frontend's pattern, minus its true code default - the false must not
+   depend on a config file Phase 3 is about to replace with env vars) plus
+   a migrator entrypoint that applies migrations and seeds once, under a
+   lock, before replicas exist. Two instances racing `Migrate()` on Postgres
+   fail on duplicate objects; racing the seed check double-seeds. This is
+   the fix Phase 5 would otherwise discover late.
 5. The remaining semantic differences are real but secondary to the above:
    string case-sensitivity in queries and unique indexes (product names,
-   reservation keys), decimal and DateTime mapping, boolean columns. The
-   reservation and release key tables get real unique constraints.
+   reservation keys), decimal and DateTime mapping, boolean columns. One
+   non-task, recorded so nobody goes looking for it: the reservation and
+   release key tables need no new constraints - their keys are already the
+   primary keys (`HasKey(k => k.Key)` in both AppDbContexts, enforced on
+   SQLite today). Step 2's violation catch is the only key-related work.
 6. Data copy: extend the `DbSplit` tool pattern with a `DbCopy` mode that
    reads the SQLite files and writes Postgres, using the ProductId resolution
    approach already proven there. Backup both SQLite files first, as in
@@ -369,7 +407,13 @@ Steps:
    success) so replica count never races a migration or a seed.
 4. HPA per service on CPU (start: 60% target) with sensible min/max: min 2
    for frontend (cold-start and availability), min 2 for catalog and orders
-   (write availability), max set by the load tests, not optimism.
+   (write availability), max set by the load tests, not optimism - and sized
+   against the database before trusting it: Npgsql pools per connection
+   string with a default maximum of 100, Postgres defaults to
+   max_connections 100, and two services times HPA max replicas times pool
+   size exhausts that well before a CPU target trips. Cap pool size per
+   replica so max_replicas x MaxPoolSize x services stays under
+   max_connections, or put PgBouncer in front; record the arithmetic.
 5. Graceful shutdown: SIGTERM handling so Orders can finish or compensate an
    in-flight reserve before a scale-down event reaps it; termination grace
    period sized to the slowest reserve+insert path (measured, not guessed).
@@ -467,10 +511,18 @@ to end once; the runbook followed by someone who did not write it.
   exit-checks loopback-prefixed bindings and unpublished services; Phase 6
   restates it for NodePort and port-forward.
 - The unlocked read-check-decrement and the key TOCTOU are invisible to every
-  sequential test in the repo. The concurrent-reserve fact is the only guard
-  against Phase 2 trading SQLite's accidental serialization for an oversell
-  bug, which is why Phase 2 is gated on it passing first on SQLite, then on
-  Postgres, then across replicas at Phase 5.
+  sequential test in the repo. The concurrent-reserve invariant (no oversell,
+  no negative stock) is the only guard against Phase 2 trading SQLite's
+  accidental serialization for an oversell bug, which is why the chain runs
+  invariant-first: green on SQLite (with the exactly-N goal recorded as a
+  baseline characteristic, not a gate, since SQLite's 5s busy timeout fails
+  it past some N), then invariant and goal both green on Postgres, then
+  across replicas at Phase 5.
+- Connection budget is a hard ceiling that arrives before CPU targets do:
+  Npgsql's default pool (100 connections) per service times HPA max
+  replicas does not fit inside Postgres's default max_connections (100) at
+  any interesting replica count. Phase 6 sizes it explicitly (pool caps or
+  PgBouncer); Phase 8's saturation alert is detection, not the fix.
 - ASPX runtime compilation in containers: the published-local runs prove the
   binaries execute, but image size, feed access inside builds, and the ~10-15s
   cold start are real. Phase 3 exists to surface this before anything depends
