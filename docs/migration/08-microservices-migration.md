@@ -352,6 +352,17 @@ Exit criteria:
 - Local startup uses the split databases successfully.
 - Source-run and published-local smoke tests pass after the split.
 
+Phase 6 execution record (2026-09-14):
+
+- Code split: Catalog owns `App_Data/catalog.db` (Products, ReservationKeys, ReleaseKeys) and Orders owns `App_Data/orders.db` (Orders, OrderItems). Both migration histories started fresh (`20260913160000_InitialCreate` per assembly); the old shared-history IDs could not be subsetted because they belong to an assembly that created tables the other service now owns. Catalog's Order/OrderItem models and its now-unused AppConstants were deleted; Orders gained its own AppConstants, a Migrations folder, and a startup `Migrate` + WAL + seed-if-empty block mirroring Catalog's. Orders also no longer depends on Catalog at startup: its seeder uses hardcoded ProductId/ProductName/UnitPrice literals, legitimate because OrderItem denormalizes them, while Catalog's seeder applies the seeded-order stock decrements as hardcoded (productId, quantity) pairs.
+- Split-seed verification came before anything else: the split seeds produced byte-identical API snapshots to the pre-split baseline captured from the last shared-code seed (12 products with exact stocks 38/16/4/0/71/60/3/17/12/200/28/2, 12 orders, 15 items, zero JSON diff), so later failures could not masquerade as split bugs.
+- Step 3 (shared transaction assumptions) confirmed as a no-op by search: the Orders context has no Products mapping and no explicit transactions, and Catalog's only transactions are the single-file reserve/release blocks.
+- Data migration: `Microservices/tools/DbSplit` creates each target schema via the owning service's context `Migrate()`, then copies rows raw (explicit ids, DateTime/decimal TEXT values preserved) and verifies per-table counts plus cross-file ProductId resolution through an ATTACH. `scripts/split-database.ps1` refuses to run while either service is listening, backs up the shared file tagged with sidecars (`App_Data/inventory.backup-20260914-010505.db`), always works from a copy, and supports `-DryRun`. The dry run on a copy verified first; the real run moved 12/3/3/15/18 rows (Products/ReservationKeys/ReleaseKeys/Orders/OrderItems), all counts MATCH, ProductId resolution ALL, total stock 451, 3 soft-deleted orders carried over honestly.
+- Rollback boundary: the last commit where rollback is a config flip is the Phase 6 code-split commit (`feat(services): split database per service`). From the data-migration commit onward, rollback requires restoring the tagged backup or a reverse data migration, and CoreWebForms's frozen in-process fallback no longer sees data written after the split. That is intended per plan and recorded here.
+- `scripts/test-contention.ps1` and `scripts/test-order-contention.ps1` were deleted: their scenario (two processes against one file) ceased to exist, and leaving them green would have been vacuous coverage.
+- `scripts/publish-local.ps1` now publishes Frontend alongside CoreWebForms, Catalog, and Orders. `scripts/smoke-parity.ps1` needed no path edits because it is HTTP-only; the split paths live in each service's appsettings (`Database:RelativePath` of `../../App_Data/catalog.db` and `../../App_Data/orders.db`).
+- Verification: both services start independently against their own file in any order; source-run and published-local smokes are green (38 -> 35 -> 38 stock accounting, pinned insufficient-stock message, struck-through deleted order rendering); 21/21 characterization tests; Frontend required zero file changes (confirmed by diff), satisfying the strip payoff check.
+
 ### Phase 7 - Local hardening only
 
 Objective: keep the split stable locally.
@@ -404,7 +415,9 @@ Use this workflow for every milestone.
 
 For the shared-DB phase, start Catalog first, then the UI or monolith against the shared file.
 
-For the split phase, start Catalog first, then Orders, then the UI.
+After the Phase 6 split, Catalog and Orders are independent (each owns its file and schema); start them in any order, then the UI.
+
+To reseed canonical fixtures after the split, delete `App_Data/catalog.db`, `App_Data/orders.db`, and their WAL sidecars, then restart both services.
 
 During Phase 5 parity verification, reseed the shared database between tree runs and run the same smoke tests against both `CoreWebForms` and `Microservices/Frontend`.
 
@@ -416,6 +429,12 @@ Use fixed localhost endpoints for the local stack.
 - `CoreWebForms` -> `http://localhost:8082`
 - `Catalog` -> `http://localhost:8094`
 - `Orders` -> `http://localhost:8095`
+
+Database files after the Phase 6 split:
+
+- Catalog -> `App_Data/catalog.db` (Products, ReservationKeys, ReleaseKeys)
+- Orders -> `App_Data/orders.db` (Orders, OrderItems)
+- Retired shared file -> `App_Data/inventory.db` (kept as frozen-tree fallback data; tagged backups beside it)
 
 Configure base URLs in `appsettings.Development.json` or environment variables.
 
