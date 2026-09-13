@@ -1,8 +1,8 @@
+using System;
 using System.ComponentModel.DataAnnotations;
-
-namespace Inventory.Contracts
+namespace Catalog
 {
-    public class ProductDto
+    public class Product
     {
         public int Id { get; set; }
 
@@ -22,6 +22,8 @@ namespace Inventory.Contracts
 
         public bool IsActive { get; set; }
         public bool IsDeleted { get; set; }
+
         public DateTime AddedDate { get; set; }
+
     }
 }
