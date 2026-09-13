@@ -411,6 +411,17 @@ Exit criteria:
 - `CoreWebForms` is frozen or retired.
 - Coexistence has an explicit end.
 
+Phase 8 execution record (2026-09-14):
+
+- Baseline first: full smoke suite green against Frontend on the source stack before anything was removed (after restarting Orders once - a concurrent `dotnet run` pair had raced on `Contracts.dll`, the known build-lock rule).
+- Coverage audit of the 21 in-process tests before deleting the tree that hosts them: 4 were already covered elsewhere (seeding and dashboard composition by the smoke suite, insufficient-stock rollback with the pinned message by smoke plus the failure suite, reserve replay idempotency by the failure suite), 16 were ported, 1 was accepted as recorded loss (`DeleteOrder_ReactivatesManuallyDeactivatedProduct` exercises the same release-rule branch - stock returns positive and the product is not soft-deleted - as the drained-product case that is ported).
+- The 16 ported behaviors live as 10 HTTP facts in the same test project (`HttpCharacterizationTests`, targets `CATALOG_BASE`/`ORDERS_BASE`, defaults 8094/8095, requires the local stack running): stock `<= 0` deactivation at the boundary on PUT and on reserve, active/inactive flag preservation on positive-stock updates, negative stock 400, decrement-keeps-active through drain-to-zero-deactivates, order total plus denormalized item persistence, unknown product 409 with the pinned message and no order row, place-order on a soft-deleted product succeeding without reactivation, delete-order restore plus reactivation with second-delete 404 and single restore, release skipping soft-deleted products, and the full status-update contract. Two wire divergences from the in-process arm are pinned as facts: a valid status update on a deleted order is 404 with status unchanged (the in-process arm silently rejected it), and invalid status or priority is 400 even on a deleted order - validation before lookup, as pinned in Phase 2.
+- Recovery point: tag `corewebforms-final` on `2def79b`, the last commit containing the tree. Deletion is recoverable from git history at that tag; no byte-copy archive was made (a copied folder would be the same bytes with none of git's guarantees).
+- Deleted: `CoreWebForms/` (tracked files via git rm, untracked bin/obj/App_Data physically), the five in-process test files, the test project's `ProjectReference` to the tree, and the legacy publish target in `scripts/publish-local.ps1` - the one live script reference the sweep found (the Phase 8 guidance's "scripts are already clean" did not hold for it). Root `README.md` run instructions now target the three-service stack, and `LegacyWebForms/README.md` points at `Microservices/Frontend/`. Historical records (`docs/migration/01` through `07`, the interview speech, `docs/migration/07-net10-migration-blocked.md`) keep their references deliberately.
+- Re-verification - the step that proves nothing depended on the tree: Frontend, Catalog, Orders, and the test project all build without it; 10/10 HTTP tests; 18/18 failure checks; source-run and published-local smokes green with the usual 38 -> 35 -> 38 accounting and pinned message.
+- Two findings during re-verification, both data artifacts rather than regressions. First, the ported tests had polluted the shared dev databases (roughly fifty test products and several orders; the seeds aged out of the dashboard's date-sorted widgets and recent-orders list), which broke the failure script's recovery greps - the recovery checks now assert the contract itself (the degrade message disappears, still no Frontend restart) instead of seed recency, and the HTTP tests soft-delete their products on dispose. Second, the first reseed attempt deleted from the wrong directory: the split databases live at repo-root `App_Data` (each service's `Database:RelativePath` is `../../App_Data/*.db`), while the per-project `App_Data` holds only logs. Reseeding the correct files restored the canonical fixtures (12 products, stock 38).
+- End state: Frontend is the only UI tree; `LegacyWebForms/` and `LegacyWebForms.sln` remain untouched as the net48 historical record; the retired tree is recoverable at `corewebforms-final`; the data rollback boundary is unchanged (Phase 6 split commit plus the tagged `inventory.db` backup).
+
 ## Local test workflow
 
 Use this workflow for every milestone.
@@ -437,9 +448,9 @@ During Phase 5 parity verification, reseed the shared database between tree runs
 Use fixed localhost endpoints for the local stack.
 
 - `Frontend` -> `http://localhost:8081`
-- `CoreWebForms` -> `http://localhost:8082`
 - `Catalog` -> `http://localhost:8094`
 - `Orders` -> `http://localhost:8095`
+- `CoreWebForms` -> retired in Phase 8 (formerly `http://localhost:8082`; recoverable at tag `corewebforms-final`)
 
 Database files after the Phase 6 split:
 
@@ -472,22 +483,23 @@ Configure base URLs in `appsettings.Development.json` or environment variables.
 
 Keep the transition aligned to the current repository instead of assuming a greenfield layout.
 
-Current root should evolve toward:
+Current root after the migration:
 
 ```text
 CoreWebForms/ (repo root)
-|-- CoreWebForms/ (current app)
 |-- Microservices/
-    |-- Frontend/
+    |-- Frontend/ (the only UI tree)
     |-- Catalog/
     |-- Orders/
     |-- Contracts/
     |-- tests/
     |-- Microservices.sln
+|-- LegacyWebForms/ (net48 historical record, untouched)
+|-- LegacyWebForms.sln
 |-- docs/
 ```
 
-The existing `LegacyWebForms/` folder and `LegacyWebForms.sln` should stay untouched until the microservice replacement is proven locally. `Microservices.sln` should include `Frontend`, `Catalog`, `Orders`, `Contracts`, and the test projects. `CoreWebForms` stays live until Phase 5 freezes it, while `Frontend` is a copied sibling tree.
+`LegacyWebForms/` and `LegacyWebForms.sln` stayed untouched throughout, as planned. The retired `CoreWebForms/` tree (the Phase 5 frozen fallback) was deleted in Phase 8 and is recoverable at tag `corewebforms-final`.
 
 ## What to keep out of this plan
 
@@ -511,3 +523,16 @@ The following are later concerns, not first-pass requirements:
 - The plan uses characterization tests before the first extraction.
 - The plan stays local-only and small enough for this repo.
 - The plan closes the rollback window at the database split.
+
+## Plan complete (2026-09-14)
+
+All eight phases executed on `feature/microservices-plan`. End state:
+
+- Three services: Frontend (`http://localhost:8081`, the only UI tree), Catalog (`8094`, owns products and stock rules), Orders (`8095`, owns orders and orchestrates reserve/release with idempotency keys).
+- Two databases at repo-root `App_Data`: `catalog.db` and `orders.db`, split by the Phase 6 tooling from the monolithic `inventory.db` with a tagged backup retained beside it.
+- Local hardening in force: bounded timeouts (2s Frontend, 3s Catalog client), GET-only bounded retry, pooled connections refreshed every 2 minutes, read-path degradation with no stack traces, 502 on place-order while Catalog is down, restart tolerance without a Frontend restart, and `X-Correlation-ID` traced across all three logs with Orders forwarding the incoming id.
+- Standing verification: 10 HTTP characterization facts (wire-level, in the test project), the 18-check failure suite, the smoke suite, and `publish-local.ps1` for published-local runs. Reseed remains: delete repo-root `App_Data/catalog.db*` and `orders.db*`, restart both services.
+- Recovery points: tag `corewebforms-final` for the retired in-process tree; the Phase 6 split commit is the last config-flip rollback boundary, with the tagged `inventory.db` backup for data restoration beyond it.
+- The out-of-scope list above remains out of scope: no gateway, outbox, event bus, circuit breaker, or production cutover exists in this repo.
+
+No further phases are planned. This document is a record, not a live plan.

@@ -189,4 +189,4 @@ Full implementation documentation with diagrams, code walkthroughs, and API refe
 
 ## Migration
 
-This project has been migrated to ASP.NET Core using `CoreWebForms.Sdk`. See the migrated project at `../CoreWebForms/` and the step-by-step migration guide in `../docs/migration/`.
+This project has been migrated to ASP.NET Core using `CoreWebForms.Sdk`. See the migrated project at `../Microservices/Frontend/` and the step-by-step migration guide in `../docs/migration/`.
