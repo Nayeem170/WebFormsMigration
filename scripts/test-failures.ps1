@@ -11,6 +11,10 @@ param(
 )
 if ($Topology -eq 'compose') {
     if (-not $PSBoundParameters.ContainsKey('BaseUrl')) { $BaseUrl = 'http://localhost:8080' }
+    # Direct service ports only exist under the test-ports overlay
+    # (compose.yaml + compose.test-ports.yaml); the documented suite-run shape.
+    if (-not $PSBoundParameters.ContainsKey('CatalogUrl')) { $CatalogUrl = 'http://localhost:18094' }
+    if (-not $PSBoundParameters.ContainsKey('OrdersUrl')) { $OrdersUrl = 'http://localhost:18095' }
     if (-not $RedisStopCommand) { $RedisStopCommand = 'docker compose stop redis' }
     if (-not $RedisStartCommand) { $RedisStartCommand = 'docker compose start redis' }
 }
@@ -24,6 +28,17 @@ $frontendLog = Join-Path $root 'Microservices\Frontend\App_Data\logs\app.log'
 $failures = 0
 function Check([string]$name, [bool]$ok) {
     if ($ok) { Write-Host "PASS $name" } else { Write-Host "FAIL $name"; $script:failures++ }
+}
+
+function Get-PoolCounts([string]$logs, [string]$poolName) {
+    [regex]::Matches($logs, ("{0} endpoint pool: (\d+) endpoint" -f $poolName)) | ForEach-Object { [int]$_.Groups[1].Value }
+}
+
+function Test-PoolCounts([int[]]$counts, [int]$expected, [int]$minLines) {
+    # Every logged pool line must report exactly $expected endpoints (a missed
+    # override falls back to the single-endpoint default and still logs - the
+    # COUNT is what fails it), and both replicas must have logged at all.
+    ($counts.Count -ge $minLines) -and (($counts | Where-Object { $_ -ne $expected }).Count -eq 0)
 }
 
 function Get-Dashboard() {
@@ -186,9 +201,17 @@ if ($Topology -eq 'compose') {
     Check 'gateway mints correlation id when absent' ($null -ne $gwMinted -and $gwMinted.Length -eq 32)
 
     $feLogs = (docker compose logs --no-log-prefix frontend 2>$null | Out-String) + (docker compose logs --no-log-prefix frontend2 2>$null | Out-String)
-    Check 'frontend logs resolved endpoint pools' (($feLogs -match 'Catalog endpoint pool: \d+ endpoint') -and ($feLogs -match 'Orders endpoint pool: \d+ endpoint'))
     $ordersLogs = docker compose logs --no-log-prefix orders 2>$null | Out-String
-    Check 'orders logs resolved catalog endpoint pool' ($ordersLogs -match 'Catalog endpoint pool: \d+ endpoint')
+
+    # Pool sizes for the CURRENT compose shape (1 catalog, 1 orders). Phase 5
+    # doubles the services; bump $expectedPoolEndpoints there WITH the shape.
+    $expectedPoolEndpoints = 1
+
+    $feCatalogCounts = Get-PoolCounts $feLogs 'Catalog'
+    $feOrdersCounts = Get-PoolCounts $feLogs 'Orders'
+    $ordersCatalogCounts = Get-PoolCounts $ordersLogs 'Catalog'
+    Check 'frontend logs resolved endpoint pools' ((Test-PoolCounts $feCatalogCounts $expectedPoolEndpoints 2) -and (Test-PoolCounts $feOrdersCounts $expectedPoolEndpoints 2))
+    Check 'orders logs resolved catalog endpoint pool' (Test-PoolCounts $ordersCatalogCounts $expectedPoolEndpoints 1)
 }
 
 Check 'stopped Catalog' (Stop-CatalogSvc)

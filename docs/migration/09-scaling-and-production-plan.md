@@ -775,9 +775,12 @@ Phase 4 execution record (2026-09-14):
   ServiceHttp/HttpProductService/HttpOrderService and Orders' CatalogClient
   select an endpoint per ATTEMPT so retries naturally fail over. Each pool
   logs its resolved endpoint count at startup ("Catalog endpoint pool:
-  N endpoint(s): ...") and the suite asserts the lines exist in both
-  frontend replicas' and orders' logs - a missed override shows as
-  "pool of one" in logs rather than a silent no-balance. Frontend's pool
+  N endpoint(s): ...") and the suite parses the COUNT from every replica's
+  pool lines and asserts it equals the shape's expected size (bumped with
+  the shape in Phase 5) - a missed override that falls back to the
+  single-endpoint appsettings default fails the suite, not just the logs.
+  Teeth verified directly: expecting 2 against a live 1-endpoint pool
+  fails the assertion. Frontend's pool
   log lines initially vanished: AppData.Initialize ran before the Trace
   listeners were attached; listener setup now precedes client
   construction. Compose Phase 4 shape is deliberately 1 catalog + 1 orders
