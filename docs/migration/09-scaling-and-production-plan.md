@@ -567,6 +567,100 @@ none.
 Rollback: the stack runs the same binaries outside containers; compose is
 additive.
 
+Phase 3 execution record (2026-09-14):
+
+- Images: one Dockerfile per service (`Microservices/{Frontend,Catalog,
+  Orders}/Dockerfile`), sdk:9.0 build stage -> aspnet:9.0 runtime, build
+  context at repo root with a `.dockerignore`. Sizes: frontend 261MB,
+  catalog/orders 268MB. The ASPX compiler ships in the runtime image BY
+  DESIGN - `EnableRuntimeAspxCompilation` compiles pages at first render,
+  and trimming Roslyn would 500 every page while health stayed green.
+  `<SatelliteResourceLanguages>en</SatelliteResourceLanguages>` on Frontend
+  drops the 13 Roslyn satellite language dirs without touching the compiler.
+- The container compiler question is answered: aspnet:9.0 as non-root app
+  compiled and rendered all three warm-up pages on a cold start - reference
+  metadata is present, no sdk base needed. First-ready in ~23s cold. The
+  gate is `/health/ready` (Phase 1's warm-up doubles as the compile gate:
+  it flips only after `/` renders successfully), not `/health/live`. The
+  compose healthcheck points at ready for Frontend, plain /health for the
+  APIs.
+- aspnet:9.0 ships no curl/wget (dropped in .NET 8): the runtime stage
+  installs curl for the container healthchecks. Redis/Postgres use their
+  own `redis-cli`/`pg_isready`.
+- Binding: compose env sets `Urls=http://0.0.0.0:PORT` for all three
+  services - the code defaults are loopback and would be unreachable in a
+  container. Frontend's warm-up already rewrites 0.0.0.0/[::] back to
+  localhost for its self-request, so readiness works unchanged.
+- Migrators are compose services, not a flag at startup: `catalog-migrator`
+  and `orders-migrator` run the same images with `--migrate`, depend on
+  postgres `service_healthy`, and the services depend on them with
+  `service_completed_successfully` plus `Database__Migrate=false`. This is
+  the shape Phase 6 turns into a Job; it landed here, before replicas make
+  the race live. Role/bootstrap SQL ships as `infra/postgres-init.sql`
+  mounted into `/docker-entrypoint-initdb.d` (runs on first volume init:
+  creates `ccw_app`, the second database, and per-database default
+  privileges - re-creating the volume re-applies it). Pitfall recorded:
+  `docker compose up --abort-on-container-exit` treats a migrator's clean
+  exit 0 as a stop signal and tears the stack down; detached `up -d` is the
+  correct invocation for one-shot init services.
+- Container restore failed first with MSB4236: NuGetSdkResolver needs a
+  version for the custom `CoreWebForms.Sdk`. Fix: root `global.json` with
+  `msbuild-sdks: { "CoreWebForms.Sdk": "1.0.0" }`, COPYed into all three
+  Dockerfiles before `dotnet restore`. Local cold-cache restore (isolated
+  NUGET_PACKAGES) verified feed-only resolution works, so the dnceng daily
+  feed access inside the build is proven, not assumed.
+- Logs: stdout first. Frontend gained a `ConsoleTraceListener` alongside
+  the file listener; Catalog/Orders keep the default console provider. The
+  file sinks are now best-effort (try/catch on the directory create and
+  provider registration): the .NET 8+ images run as non-root `app` against
+  a root-owned `/app`, and the previous unconditional
+  `Directory.CreateDirectory(App_Data/logs)` crashed startup before
+  anything served. On the host the file logs still appear (failure suite
+  keeps its local log reads); in containers stdout is the only sink, which
+  is also what makes N-replica log assertions possible later.
+- Correlation: Frontend gained the same mint/reuse/echo middleware the
+  services have (`X-Correlation-ID` response header on every response,
+  sharing the `CorrelationId` items key with ServiceHttp so outbound calls
+  carry the same id). The failure suite's correlation checks moved to
+  header assertions for the direct-API cases and `docker compose logs` for
+  the forwarded/minted chain checks in compose topology; file-log reads
+  remain for local topology.
+- Failure suite topology: `-Topology local|compose`. Local keeps port-kill
+  and `dotnet <dll>` restarts; compose uses `docker compose stop/start`.
+  The suite needs host access to Catalog/Orders, which the default compose
+  shape deliberately does not publish: `compose.test-ports.yaml` (override)
+  publishes `127.0.0.1:18094/18095` for suite runs only. The default shape
+  is what the exposure check gates.
+- The find of the phase, caught by smoke after the suite false-passed: the
+  first compose up left Orders' outbound Catalog URL at its localhost
+  default - inside the orders container that reaches nothing, so
+  place-order returned 502 with Catalog running. The suite's
+  'place order fails 502 while Catalog down' check passed for the wrong
+  reason (it would have passed with Catalog up too). Fixed with
+  `Services__Catalog__BaseUrl=http://catalog:8094` in compose; re-verified:
+  honest 502 only while stopped, 201 + stock 38->35->38 lifecycle green.
+  Lesson recorded: a negative check can pass for the wrong reason; the
+  positive lifecycle (smoke place-order) is what proves the wiring.
+- Exposure check is a command against running state
+  (`scripts/check-exposure.ps1`): `docker compose ps --format json`,
+  asserting every host-published port binds HostIp 127.0.0.1 and that
+  catalog/orders/migrators publish nothing (`PublishedPort > 0` count 0 -
+  EXPOSE alone must not trip it). Inspecting running state catches
+  override-file and profile publishes a compose-file grep would miss.
+  Green on the default shape.
+- Verification on the composed stack: failure suite all checks passed
+  (23 PASS lines: 18 prior + header-based correlation rework) in compose
+  topology with Redis mode, including degrade/recover for Catalog, Orders,
+  and Redis; smoke parity green (place 201, delete 204, stock restored);
+  `/health/ready` gate proven by cold start. Rollback proof: bare-metal
+  stack (sqlite, memory session) - failure suite all checks passed and
+  11/11 characterization facts, same binaries, no containers.
+- Standing state after the phase: the compose stack is the default running
+  stack (all healthy); the bare `ccw-postgres`/`ccw-redis` containers are
+  stopped (superseded by the compose postgres/redis on the same loopback
+  ports). Artifacts: `artifacts/phase3/failures-compose.txt`,
+  `artifacts/phase3/failures-local.txt`.
+
 ### Phase 4 - Request routing: the gateway
 
 Goal: one entry point; request-to-instance assignment becomes an explicit,
