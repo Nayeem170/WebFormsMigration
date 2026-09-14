@@ -1,0 +1,7 @@
+services:
+  catalog:
+    ports:
+      - "127.0.0.1:18094:8094"
+  orders:
+    ports:
+      - "127.0.0.1:18095:8095"

@@ -1,0 +1,127 @@
+name: corewebforms
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: localdev
+      POSTGRES_DB: ccw_catalog
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres-init.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
+    ports:
+      - "127.0.0.1:15432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ccw_catalog"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  catalog-migrator:
+    build:
+      context: .
+      dockerfile: Microservices/Catalog/Dockerfile
+    command: ["dotnet", "Catalog.dll", "--migrate"]
+    environment:
+      Database__Provider: postgres
+      Database__ConnectionString: Host=postgres;Port=5432;Database=ccw_catalog;Username=postgres;Password=localdev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  orders-migrator:
+    build:
+      context: .
+      dockerfile: Microservices/Orders/Dockerfile
+    command: ["dotnet", "Orders.dll", "--migrate"]
+    environment:
+      Database__Provider: postgres
+      Database__ConnectionString: Host=postgres;Port=5432;Database=ccw_orders;Username=postgres;Password=localdev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  catalog:
+    build:
+      context: .
+      dockerfile: Microservices/Catalog/Dockerfile
+    environment:
+      Urls: http://0.0.0.0:8094
+      Database__Provider: postgres
+      Database__ConnectionString: Host=postgres;Port=5432;Database=ccw_catalog;Username=ccw_app;Password=localdev
+      Database__Migrate: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      catalog-migrator:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8094/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  orders:
+    build:
+      context: .
+      dockerfile: Microservices/Orders/Dockerfile
+    environment:
+      Urls: http://0.0.0.0:8095
+      Database__Provider: postgres
+      Database__ConnectionString: Host=postgres;Port=5432;Database=ccw_orders;Username=ccw_app;Password=localdev
+      Database__Migrate: "false"
+      Services__Catalog__BaseUrl: http://catalog:8094
+    depends_on:
+      postgres:
+        condition: service_healthy
+      orders-migrator:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8095/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Microservices/Frontend/Dockerfile
+    environment:
+      Urls: http://0.0.0.0:8081
+      Database__Migrate: "false"
+      Session__Redis: redis:6379
+      Services__Products__BaseUrl: http://catalog:8094
+      Services__Orders__BaseUrl: http://orders:8095
+    depends_on:
+      redis:
+        condition: service_healthy
+      catalog:
+        condition: service_healthy
+      orders:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8081:8081"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8081/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+volumes:
+  postgres-data:

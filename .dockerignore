@@ -1,0 +1,16 @@
+.git
+.gitignore
+artifacts
+load
+docs
+scripts
+App_Data
+**/bin
+**/obj
+**/.vs
+**/*.user
+kilo.json
+.kilo
+.agentic
+iterations
+compose.yaml
