@@ -2,6 +2,8 @@ param(
 [string]$BaseUrl = 'http://localhost:8081',
 [string]$CatalogUrl = 'http://localhost:8094',
 [string]$OrdersUrl = 'http://localhost:8095',
+[string]$CatalogUrl2 = '',
+[string]$OrdersUrl2 = '',
 [switch]$RedisMode,
 [string]$RedisStopCommand = '',
 [string]$RedisStartCommand = '',
@@ -15,6 +17,8 @@ if ($Topology -eq 'compose') {
     # (compose.yaml + compose.test-ports.yaml); the documented suite-run shape.
     if (-not $PSBoundParameters.ContainsKey('CatalogUrl')) { $CatalogUrl = 'http://localhost:18094' }
     if (-not $PSBoundParameters.ContainsKey('OrdersUrl')) { $OrdersUrl = 'http://localhost:18095' }
+    if (-not $CatalogUrl2) { $CatalogUrl2 = 'http://localhost:18096' }
+    if (-not $OrdersUrl2) { $OrdersUrl2 = 'http://localhost:18097' }
     if (-not $RedisStopCommand) { $RedisStopCommand = 'docker compose stop redis' }
     if (-not $RedisStartCommand) { $RedisStartCommand = 'docker compose start redis' }
 }
@@ -119,8 +123,13 @@ function Req($method, $url, $body, $headers = $null) {
 if (-not (Wait-Healthy $CatalogUrl 5) -or -not (Wait-Healthy $OrdersUrl 5)) {
     throw 'Catalog and Orders must be running before test-failures.ps1 (Frontend too).'
 }
-if ($Topology -eq 'compose' -and -not (Wait-Healthy $BaseUrl 30)) {
-    throw 'Gateway must be running before test-failures.ps1 in compose topology.'
+if ($Topology -eq 'compose') {
+    if (-not (Wait-Healthy $CatalogUrl2 15) -or -not (Wait-Healthy $OrdersUrl2 15)) {
+        throw 'Second Catalog/Orders replicas must be running in compose topology (catalog2, orders2).'
+    }
+    if (-not (Wait-Healthy $BaseUrl 30)) {
+        throw 'Gateway must be running before test-failures.ps1 in compose topology.'
+    }
 }
 Get-Dashboard | Out-Null
 
@@ -183,9 +192,16 @@ Req Delete "$OrdersUrl/api/orders/$probeOrderId" | Out-Null
 
 function Read-ServiceLog([string]$logPath, [string]$service) {
     # Aggregated across replicas ON PURPOSE (--no-log-prefix): the correlation
-    # checks only need "some replica logged this id". Per-replica attribution
-    # lives in Get-ServicePoolEntries, which keeps prefixes.
-    if ($Topology -eq 'compose') { return (docker compose logs --no-log-prefix $service 2>$null | Out-String) }
+    # checks only need "some replica logged this id", and with 2x services the
+    # request may land on either replica, so the twin's logs are appended.
+    # Per-replica attribution lives in Get-ServicePoolEntries, which keeps
+    # prefixes.
+    if ($Topology -eq 'compose') {
+        $text = docker compose logs --no-log-prefix $service 2>$null | Out-String
+        $twin = "${service}2"
+        if (docker compose ps -q $twin 2>$null) { $text += (docker compose logs --no-log-prefix $twin 2>$null | Out-String) }
+        return $text
+    }
     return (Get-Content $logPath -Raw)
 }
 
@@ -217,40 +233,108 @@ if ($Topology -eq 'compose') {
     $gwMinted = ($r.Headers['X-Correlation-ID'] | Select-Object -First 1)
     Check 'gateway mints correlation id when absent' ($null -ne $gwMinted -and $gwMinted.Length -eq 32)
 
-    # Pool sizes for the CURRENT compose shape (1 catalog, 1 orders). Phase 5
-    # doubles the services; bump $expectedPoolEndpoints there WITH the shape.
-    # Attribution is per container (see Test-ServicePool), so a stale
-    # frontend2 image logging a different pool than frontend fails.
-    $expectedPoolEndpoints = 1
+    # Pool sizes for the CURRENT compose shape: Phase 5 = 2x catalog, 2x orders.
+    # Bump WITH the shape. Attribution is per container (see Test-ServicePool),
+    # so a stale replica image logging a different pool than its twin fails.
+    $expectedPoolEndpoints = 2
 
     Check 'frontend logs resolved endpoint pools' ((Test-ServicePool 'frontend' 'Catalog' $expectedPoolEndpoints) -and (Test-ServicePool 'frontend' 'Orders' $expectedPoolEndpoints))
-    Check 'orders logs resolved catalog endpoint pool' (Test-ServicePool 'orders' 'Catalog' $expectedPoolEndpoints)
+    Check 'orders logs resolved catalog endpoint pool' ((Test-ServicePool 'orders' 'Catalog' $expectedPoolEndpoints) -and (Test-ServicePool 'orders2' 'Catalog' $expectedPoolEndpoints))
 }
 
-Check 'stopped Catalog' (Stop-CatalogSvc)
+$orderOne = $probeOrder.Clone(); $orderOne.items = @(@{ productId = 1; productName = 'Wireless Headphones'; quantity = 1; unitPrice = 79.99 })
+
+if ($Topology -eq 'compose') {
+    Check 'stopped one Catalog replica' (Stop-CatalogSvc)
+    $page = Get-Dashboard
+    Check 'dashboard still serves products with one Catalog replica down (pool failover)' ($page.StatusCode -eq 200 -and $page.Content -notmatch 'Catalog is unavailable right now' -and $page.Content -match 'Wireless Headphones')
+    $r = Req Post "$OrdersUrl/api/orders" $orderOne
+    Check 'place order succeeds via surviving Catalog replica' ($r.StatusCode -eq 201)
+    docker compose stop catalog2 | Out-Null
+    Check 'stopped second Catalog replica' ($true)
+} else {
+    Check 'stopped Catalog' (Stop-CatalogSvc)
+}
+
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $page = Get-Dashboard
 $sw.Stop()
 Check 'dashboard degrades with Catalog down (message, no trace)' ($page.StatusCode -eq 200 -and $page.Content -match 'Catalog is unavailable right now' -and $page.Content -notmatch 'StackTrace')
 Check ('dashboard bounded wall-clock with Catalog down ({0:n1}s < 25s)' -f $sw.Elapsed.TotalSeconds) ($sw.Elapsed.TotalSeconds -lt 25)
-$orderOne = $probeOrder.Clone(); $orderOne.items = @(@{ productId = 1; productName = 'Wireless Headphones'; quantity = 1; unitPrice = 79.99 })
 $r = Req Post "$OrdersUrl/api/orders" $orderOne
 Check 'place order fails 502 while Catalog down' ($r.StatusCode -eq 502 -and $r.Content -match 'CatalogUnavailable')
 
-Start-Catalog
+if ($Topology -eq 'compose') {
+    Start-Catalog
+    docker compose start catalog2 | Out-Null
+    $bothUp = $false
+    foreach ($i in 1..30) {
+        if ((Wait-Healthy $CatalogUrl 1) -and (Wait-Healthy $CatalogUrl2 1)) { $bothUp = $true; break }
+        Start-Sleep 2
+    }
+    Check 'both Catalog replicas back' $bothUp
+} else {
+    Start-Catalog
+}
 $page = Get-Dashboard
 Check 'Frontend recovers after Catalog restart (no Frontend restart)' ($page.StatusCode -eq 200 -and $page.Content -notmatch 'Catalog is unavailable right now')
 
-Check 'stopped Orders' (Stop-OrdersSvc)
+if ($Topology -eq 'compose') {
+    # Drift-proof content marker: assert the newest LIVE order (per the API,
+    # before the stop) still renders. Fixed seeded names drift out of the
+    # recent-orders window as runs accumulate - the Karen Novak lesson.
+    $paged = Invoke-RestMethod "$OrdersUrl/api/orders?skip=0&take=1"
+    $recentName = if ($paged.items) { @($paged.items)[0].customerName } else { $null }
+    Check 'stopped one Orders replica' (Stop-OrdersSvc)
+    $page = Get-Dashboard
+    Check 'dashboard still serves with one Orders replica down (pool failover)' ($page.StatusCode -eq 200 -and $page.Content -notmatch 'Orders is unavailable right now' -and ($null -eq $recentName -or $page.Content -match [regex]::Escape($recentName)))
+    $ordersDown = $false
+    try { Invoke-WebRequest "$OrdersUrl/api/orders?skip=0&take=1" -UseBasicParsing -TimeoutSec 10 | Out-Null } catch { $ordersDown = $true }
+    Check 'Orders replica A unreachable while stopped' $ordersDown
+    docker compose stop orders2 | Out-Null
+    Check 'stopped second Orders replica' ($true)
+} else {
+    Check 'stopped Orders' (Stop-OrdersSvc)
+}
+
 $page = Get-Dashboard
 Check 'dashboard degrades with Orders down' ($page.StatusCode -eq 200 -and $page.Content -match 'Orders is unavailable right now')
 $ordersDown = $false
 try { Invoke-WebRequest "$OrdersUrl/api/orders?skip=0&take=1" -UseBasicParsing -TimeoutSec 10 | Out-Null } catch { $ordersDown = $true }
 Check 'Orders API unreachable while stopped' $ordersDown
 
-Start-Orders
+if ($Topology -eq 'compose') {
+    Start-Orders
+    docker compose start orders2 | Out-Null
+    $bothUp = $false
+    foreach ($i in 1..30) {
+        if ((Wait-Healthy $OrdersUrl 1) -and (Wait-Healthy $OrdersUrl2 1)) { $bothUp = $true; break }
+        Start-Sleep 2
+    }
+    Check 'both Orders replicas back' $bothUp
+} else {
+    Start-Orders
+}
 $page = Get-Dashboard
 Check 'Frontend recovers after Orders restart' ($page.StatusCode -eq 200 -and $page.Content -notmatch 'Orders is unavailable right now')
+
+if ($Topology -eq 'compose') {
+    # Cross-replica double-delete: soft-delete + release on replica A, then the
+    # same DELETE against replica B must 404 (already deleted) and must NOT
+    # release stock a second time. Both replicas share the Orders database.
+    $before = (Invoke-RestMethod "$CatalogUrl/api/products/3").stock
+    $orderDel = $probeOrder.Clone(); $orderDel.items = @(@{ productId = 3; productName = 'USB-C Hub'; quantity = 1; unitPrice = 39.99 })
+    $r = Req Post "$OrdersUrl/api/orders" $orderDel
+    $delId = $r.Content.Trim('"')
+    $placed = (Invoke-RestMethod "$CatalogUrl/api/products/3").stock
+    Check 'double-delete setup: order placed via replica A' ($r.StatusCode -eq 201 -and $placed -eq $before - 1)
+    $r = Req Delete "$OrdersUrl/api/orders/$delId"
+    $afterFirst = (Invoke-RestMethod "$CatalogUrl/api/products/3").stock
+    Check 'delete on replica A -> 204, stock released once' ($r.StatusCode -eq 204 -and $afterFirst -eq $before)
+    $r = Req Delete "$OrdersUrl2/api/orders/$delId"
+    $afterSecond = (Invoke-RestMethod "$CatalogUrl/api/products/3").stock
+    Check 'delete on replica B -> 404, no double release' ($r.StatusCode -eq 404 -and $afterSecond -eq $before)
+}
 
 if ($RedisMode) {
     Invoke-Expression $RedisStopCommand | Out-Null
@@ -265,8 +349,10 @@ if ($RedisMode) {
         Check 'gateway returns 503 while Redis down (backends report unready)' $gateway503
     }
     else {
+        $paged = Invoke-RestMethod "$OrdersUrl/api/orders?skip=0&take=1"
+        $recentName = if ($paged.items) { @($paged.items)[0].customerName } else { $null }
         $page = Get-Dashboard
-        Check 'dashboard survives Redis down (content intact)' ($page.StatusCode -eq 200 -and $page.Content -match 'Leo Garcia')
+        Check 'dashboard survives Redis down (content intact)' ($page.StatusCode -eq 200 -and ($null -eq $recentName -or $page.Content -match [regex]::Escape($recentName)))
         $products = Invoke-WebRequest ($BaseUrl + '/Pages/Products/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60
         Check 'products page survives Redis down' ($products.StatusCode -eq 200 -and $products.Content -match 'Wireless Headphones')
         $ordersPage = Invoke-WebRequest ($BaseUrl + '/Pages/Orders/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60

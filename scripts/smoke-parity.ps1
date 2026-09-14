@@ -28,9 +28,12 @@ function Req($method, $url, $body) {
     [pscustomobject]@{ Status = [int]$r.StatusCode; Body = $r.Content }
 }
 
+# Recent-orders window content is run-history-dependent (fixed seeded names
+# drift out as orders accumulate) - derive the expected marker from the API.
+$paged = Invoke-RestMethod "$OrdersUrl/api/orders?skip=0&take=1"
+$recentName = if ($paged.items) { @($paged.items)[0].customerName } else { $null }
 $home_ = GetPage '/'
-Check 'home shows Leo Garcia (newest seeded order)' ($home_ -match 'Leo Garcia')
-Check 'home shows Karen Novak' ($home_ -match 'Karen Novak')
+Check 'home renders newest live order (API-derived)' ($null -ne $recentName -and $home_ -match [regex]::Escape($recentName))
 
 # The grid pages Id ASC with an active-only filter, so fixed names can drift
 # (and an absence can be paging, not filter). Re-derive the expected page 1

@@ -2,6 +2,7 @@ param(
     [string[]]$Ops = @('dashboard', 'products-page', 'catalog-read', 'orders-read', 'orders-write'),
     [string]$Dur = '20s',
     [string]$OutFile = 'load\baseline-results.md',
+    [string]$FrontUrl = 'http://localhost:8081',
     [switch]$All
 )
 
@@ -27,7 +28,7 @@ $opsExpanded = $Ops | ForEach-Object { $_ -split ',' } | Where-Object { $_ }
 foreach ($op in $opsExpanded) {
     foreach ($vus in $levels[$op]) {
         Write-Host "running ${op} at ${vus} VUs for ${Dur}..."
-        $output = & $k6 'run' '--quiet' '-e' "OP=$op" '-e' "VUS=$vus" '-e' "DUR=$Dur" (Join-Path $root 'load\k6-scenarios.js') 2>&1 | ForEach-Object { "$_" }
+        $output = & $k6 'run' '--quiet' '-e' "OP=$op" '-e' "VUS=$vus" '-e' "DUR=$Dur" '-e' "FRONT=$FrontUrl" (Join-Path $root 'load\k6-scenarios.js') 2>&1 | ForEach-Object { "$_" }
         $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
         $output | Set-Content (Join-Path $resultsDir "$($stamp)-$op-vus$vus.txt")
 
