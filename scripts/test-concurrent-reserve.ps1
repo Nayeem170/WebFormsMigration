@@ -54,7 +54,16 @@ foreach ($n in $Ns) {
     $rows.Add($row)
     Write-Host ("N={0,-4} successes={1,-4} other=[{2,-12}] stock={3,-4} invariant={4} goal={5} wall={6}ms" -f $row.N, $row.Successes, $row.Other, $row.StockAfter, $row.Invariant, $row.Goal, $row.WallMs)
 
-    Req Delete "$CatalogUrl/api/products/$id" | Out-Null
+    # Cleanup must not fail silently: a delete that 5xx's leaves a live
+    # sweep product in the catalog, which drifts the products grid and the
+    # Phase 5 throughput read scenarios. One retry, then loud failure.
+    $deleted = $false
+    foreach ($attempt in 1..2) {
+        $del = Req Delete "$CatalogUrl/api/products/$id"
+        if ($del.StatusCode -eq 204) { $deleted = $true; break }
+        Start-Sleep -Seconds 2
+    }
+    if (-not $deleted) { throw "sweep product cleanup failed for $name (id $id): last status $($del.StatusCode) body=[$($del.Content)]" }
 }
 
 $header = @(

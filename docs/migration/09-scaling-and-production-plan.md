@@ -811,6 +811,37 @@ Phase 4 execution record (2026-09-14):
   Seeded-name assertions now live on home's bounded recent window; the
   orders page asserts structure plus the self-referential place/
   struck-through pair, which cannot drift.
+- Post-verification hardening (same review class, third pass): the products
+  grid had the orders-page drift bug's twin shape, but the fix differs
+  because the semantics differ - the grid's default sort is Id ASC, so NEW
+  products append to later pages and can never push seeded names off page 1
+  (Karen fell off orders because that list sorts newest-first), and a
+  create-then-assert-absent probe would be vacuous here because a new
+  product is past page 1 for paging reasons alone. The drift-proof form is
+  parity: the smoke re-derives expected page 1 from the API using the
+  page's own rule (active-only, Id ASC, first 5) and requires the rendered
+  grid to match exactly - broken filter, sort, or page size all fail it.
+  Teeth verified against a doctored expectation. The row-count label check
+  parses the claimed number instead of substring-matching ("1 product"
+  matches inside "11 products"). Also: the three unconditional
+  Check 'GET / returns 200' ($true) lines were dropped; GetPage throwing
+  already covers non-200 and unconditional PASS lines are the vacuous-pass
+  shape in miniature.
+- That rewrite found two more real bugs immediately. (1) The sweep's
+  cleanup deleted each rung's product with SkipHttpErrorCheck and piped to
+  Out-Null - a 5xx left a live sweep product in the catalog silently, which
+  drifts the grid AND changes what Phase 5's read scenarios measure. Now:
+  delete must return 204 (one retry), else the sweep stops loudly. The
+  parity check's first API call also exposed (2) Catalog's product list
+  endpoint taking a non-optional `bool includeDeleted` - every existing
+  caller always sent the parameter, so a bare GET /api/products returned
+  400 and nothing had ever noticed. Now optional, default false.
+- PowerShell hazard recorded: on 7.6.6, `@(Invoke-RestMethod <url>)` inside
+  a script returns a JSON top-level array as ONE nested Object[] element,
+  which member-enumerates past Where-Object and silently defeats
+  Select-Object -First (filter "passed" all 12 products, count came out 1).
+  Invoke-WebRequest + ConvertFrom-Json has flat, predictable shape; smoke
+  uses that for array endpoints.
 - Verification: failure suite 28 checks green through the gateway port in
   compose topology with Redis mode (including both-replicas, pass-through,
   mint, pool-log, Redis-503, and the kill/rejoin sequence); smoke parity
