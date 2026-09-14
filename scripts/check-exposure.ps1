@@ -14,7 +14,7 @@ $raw = docker compose -p $Project ps --all --format json 2>$null
 if (-not $raw) { throw "no running compose project '$Project' - start the stack first" }
 $services = @($raw | ForEach-Object { $_ | ConvertFrom-Json })
 
-$internalOnly = @('catalog', 'orders', 'catalog-migrator', 'orders-migrator')
+$internalOnly = @('catalog', 'orders', 'catalog-migrator', 'orders-migrator', 'frontend', 'frontend2')
 foreach ($svc in $services) {
     $name = $svc.Service
     $publishers = @($svc.Publishers)

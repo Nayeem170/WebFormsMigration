@@ -97,7 +97,7 @@ services:
       retries: 12
       start_period: 10s
 
-  frontend:
+  frontend: &frontend-service
     build:
       context: .
       dockerfile: Microservices/Frontend/Dockerfile
@@ -114,14 +114,35 @@ services:
         condition: service_healthy
       orders:
         condition: service_healthy
-    ports:
-      - "127.0.0.1:8081:8081"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8081/health/ready"]
       interval: 10s
       timeout: 5s
       retries: 30
       start_period: 15s
+
+  frontend2:
+    <<: *frontend-service
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Microservices/Gateway/Dockerfile
+    environment:
+      Urls: http://0.0.0.0:8080
+    depends_on:
+      frontend:
+        condition: service_healthy
+      frontend2:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
 
 volumes:
   postgres-data:
