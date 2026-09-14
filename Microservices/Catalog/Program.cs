@@ -114,7 +114,7 @@ if (migrateOnStartup)
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
-app.MapGet("/api/products", (bool includeDeleted, AppDbContext db) =>
+app.MapGet("/api/products", (AppDbContext db, bool includeDeleted = false) =>
 {
     var query = db.Products.AsNoTracking().AsQueryable();
     if (!includeDeleted)
