@@ -877,7 +877,103 @@ Steps:
 Exit criteria: suites green under round-robin; per-replica kill tests behave
 as specified; throughput scales measurably.
 
+Predicted throughput shape (written BEFORE running the Phase 5 ladder, per
+the standing rule - baseline above is the single-instance run in
+load/concurrent-reserve.md: 8/8 and 64/64 clean in 210/376ms; 128 ->
+58 successes + 70x503 in 4425ms; 256 -> 124 + 132x503 in 6834ms):
+
+- Low rungs (8, 64): wall time flat to slightly better (roughly 0.8-1.2x
+  of single-instance). These rungs never saturate a single catalog, so a
+  second replica adds little; nothing regresses.
+- High rungs (128, 256): the bottleneck is per-product row serialization
+  (FOR UPDATE on one shared row across both processes) against one
+  Postgres, so wall time improves modestly at best. The 503 counts at
+  128/256 stay the same order of magnitude or get slightly WORSE:
+  two processes contending for the same row means more lock waits inside
+  the same per-request timeout budget. The recently classified 53300
+  should be invisible (MaxPoolSize=20 x 4 = 80 < 100).
+- Invariant (stock >= 0, stock == N - successes) must PASS at every rung:
+  cross-process oversell is the thing this phase exists to disprove.
+- instances == 2 at every rung; a rung observing one catalog instance
+  means the sweep is not actually spanning replicas and the run does not
+  count.
+- Read paths (dashboard/products through the gateway) should scale
+  closer to linearly than the write path: reads are lock-free and
+  pool-parallel.
+- Table-size note before comparing numbers: soft-deleted sweep rows from
+  earlier phases stood at 30 of 42 total products at Phase 5 start. If the
+  ladder has been run heavily since, re-check; a much larger table makes
+  the read numbers not-quite-comparable to Phase 0's baseline.
+
 Rollback: scale counts back to 1; nothing else changes.
+
+Phase 5 execution record (2026-09-14):
+
+- Shape: explicit catalog2/orders2 services (same anchor/merge pattern as
+  frontend2) rather than deploy.replicas - stable DNS names for the client
+  pools. Frontend and Orders BaseUrls are now 2-endpoint CSVs; pools log
+  "2 endpoint(s)" per process and the suite asserts the count per
+  container. All four services cap Npgsql MaxPoolSize=20 in compose (4 x
+  20 = 80 < max_connections=100, headroom for migrators/psql); the Npgsql
+  default of 100-per-process would let four pools exhaust the server on
+  their own. 53300 (too_many_connections) joined 55P03/40P01 in Catalog's
+  IsTransientLock so a future pool storm degrades to a retried 503 rather
+  than a raw 500.
+- Suite (39 checks, compose): replica-failover phases for both services
+  (stop catalog A -> dashboard still serves AND place order still succeeds
+  via B; then stop B -> the pre-existing degrade/502 checks), both-replicas
+  -back gates, and the cross-replica double-delete (204 on A, 404 on B,
+  stock released exactly once - safe by construction: soft-delete is one
+  shared row, the second DELETE sees IsDeleted). Read-ServiceLog now
+  appends the twin replica's logs for the correlation checks; with 2x
+  services the request may land on either replica, and the first run
+  failed exactly there ('correlation id reaches Catalog log' grepped only
+  catalog's logs while the request hit catalog2).
+- Local regression caught a self-inflicted bug the same hour: the
+  failover-phase rework initially dropped the local-topology stop calls
+  entirely, so 'Catalog down' checks ran with catalog still up and failed
+  on their own negation. Local stops restored; local suite 19 checks
+  green, 11/11 facts.
+- Content checks de-drifted: 'home shows Leo Garcia' and the Orders
+  failover check now assert the newest LIVE order's name (fetched from the
+  API before the stop) instead of a fixed seed - by Phase 5 the recent
+  orders window was already buried under accumulated probe orders, so the
+  fixed-name form would have failed for non-regression reasons (Karen
+  Novak's lesson applied one window earlier). Orders' list endpoint got
+  the same optional-params fix Catalog received (bool includeDeleted,
+  status, skip, take were all required; the suite's take=1 probe 400ed).
+- Sweep: alternates replicas per request (even -> A, odd -> B) so one rung
+  exercises both processes against the shared row, reports instances=N per
+  rung, and THROWS if any rung observed fewer than 2 distinct X-Instance
+  values - a rung that never spans replicas does not count.
+- Ladder, same-day apples-to-apples (gateway stack, same DB): 1x today =
+  8/8 2120ms, 64/64 2632ms, 128/128 3058ms, 256 -> 81 successes + 175x503
+  in 22199ms; 2x today = 8/8 2160ms, 64/64 2668ms, 128/128 3026ms,
+  256/256 clean in 4033ms. Invariant PASS at every rung both shapes.
+  Reads through the gateway (k6, frontend pair constant, only
+  catalog2/orders2 differing): products-page 1.67-2.09x rps, dashboard
+  1.45x at 5 VUs and 5.2x at 50 VUs where 1x collapses to 79 rps while 2x
+  holds 408.
+- Prediction outcome, honestly: the low-rung "flat" and reads-roughly
+  -linear calls were right, and instances=2/invariant held everywhere. The
+  high-rung call was WRONG in the good direction - predicted same-order
+  503s or slightly worse, got zero 503s at 128 AND 256. Two reasons the
+  prediction under-called: per-process contention halves (each replica
+  serializes N/2, so per-request lock queues shorten), and MaxPoolSize=20
+  changed the contention profile so much that today's 1x also runs 128
+  clean where the original baseline dropped 70 - the pool cap, not the
+  second replica, fixed the mid-rung storms. Only at 256 does 1x still
+  collapse (22s wall) while 2x completes clean at 4s. Lesson recorded:
+  when a tuning knob changes between measurements, re-run the OLD shape
+  the same day before attributing the delta to the NEW shape.
+- Table-size check per the review note: 30/42 soft-deleted before the
+  Phase 5 ladder, 40/52 after (the four rung products, cleaned up but
+  retained as soft-deletes) - small enough that read comparisons remain
+  meaningful; re-check if the ladder runs heavily again.
+- Standing state: default-shape compose stack, 9 services healthy
+  (2x frontend, 2x catalog, 2x orders, gateway, postgres, redis),
+  exposure all-pass (catalog2/orders2 join the zero-published list).
+  Artifacts: artifacts/phase5/.
 
 ### Phase 6 - Autoscaling: grow and shrink on metrics
 
