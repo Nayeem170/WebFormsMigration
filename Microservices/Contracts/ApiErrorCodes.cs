@@ -5,5 +5,6 @@ namespace Inventory.Contracts
         public const string Validation = "Validation";
         public const string ProductNotFound = "ProductNotFound";
         public const string InsufficientStock = "InsufficientStock";
+        public const string LockTimeout = "LockTimeout";
     }
 }

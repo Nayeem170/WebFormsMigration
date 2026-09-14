@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -24,7 +24,7 @@ namespace Orders.Migrations
                     Status = table.Column<string>(type: "TEXT", nullable: false),
                     Priority = table.Column<string>(type: "TEXT", nullable: false),
                     Extras = table.Column<string>(type: "TEXT", nullable: false),
-                    Total = table.Column<decimal>(type: "TEXT", nullable: false),
+                    Total = table.Column<decimal>(type: "TEXT", precision: 18, scale: 2, nullable: false),
                     IsDeleted = table.Column<int>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
@@ -42,7 +42,7 @@ namespace Orders.Migrations
                     ProductId = table.Column<int>(type: "INTEGER", nullable: false),
                     ProductName = table.Column<string>(type: "TEXT", maxLength: 200, nullable: false),
                     Quantity = table.Column<int>(type: "INTEGER", nullable: false),
-                    UnitPrice = table.Column<decimal>(type: "TEXT", nullable: false)
+                    UnitPrice = table.Column<decimal>(type: "TEXT", precision: 18, scale: 2, nullable: false)
                 },
                 constraints: table =>
                 {

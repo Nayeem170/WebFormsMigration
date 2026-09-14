@@ -1,9 +1,12 @@
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
+using System.Globalization;
 using Catalog;
 using Catalog.Logging;
 using Inventory.Contracts;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,7 +23,22 @@ var dbPath = !string.IsNullOrEmpty(dbPathSetting)
     : Path.Combine(builder.Environment.ContentRootPath,
         builder.Configuration["Database:RelativePath"] ?? "App_Data/inventory.db");
 
-builder.Services.AddScoped<AppDbContext>(_ => new AppDbContext(dbPath));
+var provider = builder.Configuration["Database:Provider"] ?? "sqlite";
+var usePostgres = string.Equals(provider, "postgres", StringComparison.OrdinalIgnoreCase);
+if (usePostgres)
+{
+    var connectionString = builder.Configuration["Database:ConnectionString"];
+    if (string.IsNullOrEmpty(connectionString))
+        throw new InvalidOperationException("Database:ConnectionString is required when Database:Provider is postgres.");
+    builder.Services.AddScoped<AppDbContext>(_ => new PostgresAppDbContext(connectionString));
+}
+else
+{
+    builder.Services.AddScoped<AppDbContext>(_ => new SqliteAppDbContext(dbPath));
+}
+
+var runAsMigrator = args.Contains("--migrate");
+var migrateOnStartup = runAsMigrator || builder.Configuration.GetValue<bool?>("Database:Migrate") == true;
 
 var app = builder.Build();
 
@@ -45,19 +63,45 @@ app.Use(async (context, next) =>
     }
 });
 
-using (var scope = app.Services.CreateScope())
+if (migrateOnStartup)
 {
-    var dbDir = Path.GetDirectoryName(dbPath);
-    if (!string.IsNullOrEmpty(dbDir))
-        Directory.CreateDirectory(dbDir);
+    using (var scope = app.Services.CreateScope())
+    {
+        if (!usePostgres)
+        {
+            var dbDir = Path.GetDirectoryName(dbPath);
+            if (!string.IsNullOrEmpty(dbDir))
+                Directory.CreateDirectory(dbDir);
+        }
 
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.Migrate();
-    db.Database.OpenConnection();
-    db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
-    db.Database.CloseConnection();
-    if (!db.Products.Any())
-        new DbSeeder(db).Seed();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        if (usePostgres)
+        {
+            db.Database.OpenConnection();
+            db.Database.ExecuteSqlRaw("SELECT pg_advisory_lock(94001);");
+            try
+            {
+                db.Database.Migrate();
+            }
+            finally
+            {
+                db.Database.ExecuteSqlRaw("SELECT pg_advisory_unlock(94001);");
+                db.Database.CloseConnection();
+            }
+        }
+        else
+        {
+            db.Database.Migrate();
+            db.Database.OpenConnection();
+            db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
+            db.Database.CloseConnection();
+        }
+        if (!db.Products.Any())
+            new DbSeeder(db).Seed();
+    }
+
+    if (runAsMigrator)
+        return;
 }
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
@@ -133,23 +177,35 @@ app.MapPost("/api/products/reserve", (ReserveStockRequest request, AppDbContext 
     if (db.ReservationKeys.Find(request.ReservationKey) != null)
         return Results.Ok(new { reserved = true, replayed = true });
 
-    using var tx = db.Database.BeginTransaction();
-    foreach (var item in request.Items)
+    var items = request.Items.OrderBy(i => i.ProductId).ToList();
+    try
     {
-        var product = db.Products.Find(item.ProductId);
-        if (product == null)
-            return StockRuleError(ApiErrorCodes.ProductNotFound,
-                string.Format("Product ID {0} not found.", item.ProductId));
-        if (product.Stock < item.Quantity)
-            return StockRuleError(ApiErrorCodes.InsufficientStock,
-                string.Format("Insufficient stock for product ID {0}: requested {1}, available {2}", item.ProductId, item.Quantity, product.Stock));
-        product.Stock -= item.Quantity;
-        if (product.Stock <= 0) product.IsActive = false;
+        using var tx = db.Database.BeginTransaction();
+        var products = LoadProductsForUpdate(db, items);
+        foreach (var item in items)
+        {
+            if (!products.TryGetValue(item.ProductId, out var product))
+                return StockRuleError(ApiErrorCodes.ProductNotFound,
+                    string.Format("Product ID {0} not found.", item.ProductId));
+            if (product.Stock < item.Quantity)
+                return StockRuleError(ApiErrorCodes.InsufficientStock,
+                    string.Format("Insufficient stock for product ID {0}: requested {1}, available {2}", item.ProductId, item.Quantity, product.Stock));
+            product.Stock -= item.Quantity;
+            if (product.Stock <= 0) product.IsActive = false;
+        }
+        db.ReservationKeys.Add(new ReservationKey { Key = request.ReservationKey, CreatedAt = DateTime.UtcNow });
+        db.SaveChanges();
+        tx.Commit();
+        return Results.Ok(new { reserved = true, replayed = false });
     }
-    db.ReservationKeys.Add(new ReservationKey { Key = request.ReservationKey, CreatedAt = DateTime.UtcNow });
-    db.SaveChanges();
-    tx.Commit();
-    return Results.Ok(new { reserved = true, replayed = false });
+    catch (DbUpdateException ex) when (IsUniqueViolation(ex, "ReservationKeys"))
+    {
+        return Results.Ok(new { reserved = true, replayed = true });
+    }
+    catch (Exception ex) when (IsTransientLock(ex))
+    {
+        return TransientLockError();
+    }
 });
 
 app.MapPost("/api/products/release", (ReleaseStockRequest request, AppDbContext db) =>
@@ -160,19 +216,32 @@ app.MapPost("/api/products/release", (ReleaseStockRequest request, AppDbContext 
     if (db.ReleaseKeys.Find(request.ReleaseKey) != null)
         return Results.Ok(new { released = true, replayed = true });
 
-    using var tx = db.Database.BeginTransaction();
-    foreach (var item in request.Items)
+    var items = request.Items.OrderBy(i => i.ProductId).ToList();
+    try
     {
-        var product = db.Products.Find(item.ProductId);
-        if (product == null) continue;
-        product.Stock += item.Quantity;
-        if (product.Stock > 0 && !product.IsDeleted)
-            product.IsActive = true;
+        using var tx = db.Database.BeginTransaction();
+        var products = LoadProductsForUpdate(db, items);
+        foreach (var item in items)
+        {
+            if (!products.TryGetValue(item.ProductId, out var product))
+                continue;
+            product.Stock += item.Quantity;
+            if (product.Stock > 0 && !product.IsDeleted)
+                product.IsActive = true;
+        }
+        db.ReleaseKeys.Add(new ReleaseKey { Key = request.ReleaseKey, CreatedAt = DateTime.UtcNow });
+        db.SaveChanges();
+        tx.Commit();
+        return Results.Ok(new { released = true, replayed = false });
     }
-    db.ReleaseKeys.Add(new ReleaseKey { Key = request.ReleaseKey, CreatedAt = DateTime.UtcNow });
-    db.SaveChanges();
-    tx.Commit();
-    return Results.Ok(new { released = true, replayed = false });
+    catch (DbUpdateException ex) when (IsUniqueViolation(ex, "ReleaseKeys"))
+    {
+        return Results.Ok(new { released = true, replayed = true });
+    }
+    catch (Exception ex) when (IsTransientLock(ex))
+    {
+        return TransientLockError();
+    }
 });
 
 app.Run();
@@ -207,6 +276,38 @@ static IResult StockRuleError(string errorCode, string message)
 {
     return Results.Json(new ApiErrorResponse { ErrorCode = errorCode, Message = message }, statusCode: 409);
 }
+
+    static Dictionary<int, Product> LoadProductsForUpdate(AppDbContext db, List<StockItemDto> items)
+    {
+        var ids = items.Select(i => i.ProductId).Distinct().OrderBy(id => id).ToList();
+        if (!db.Database.IsNpgsql())
+            return db.Products.Where(p => ids.Contains(p.Id)).ToDictionary(p => p.Id);
+        var idList = string.Join(", ", ids.Select(id => id.ToString(CultureInfo.InvariantCulture)));
+        return db.Products
+            .FromSqlRaw($"SELECT * FROM \"Products\" WHERE \"Id\" IN ({idList}) ORDER BY \"Id\" FOR UPDATE")
+            .ToDictionary(p => p.Id);
+    }
+
+    static bool IsUniqueViolation(DbUpdateException ex, string table) =>
+        ex.InnerException is PostgresException pg && pg.SqlState == "23505"
+        || ex.InnerException is SqliteException sqlite && sqlite.SqliteErrorCode == 19 && sqlite.Message.Contains(table);
+
+    static bool IsTransientLock(Exception ex)
+    {
+        for (var e = ex; e != null; e = e.InnerException)
+        {
+            if (e is PostgresException pg && pg.SqlState is "55P03" or "40P01") return true;
+            if (e is SqliteException sql && sql.SqliteErrorCode == 5) return true;
+        }
+        return false;
+    }
+
+static IResult TransientLockError()
+    => Results.Json(new ApiErrorResponse
+    {
+        ErrorCode = ApiErrorCodes.LockTimeout,
+        Message = "The operation could not complete because the database was busy; retry the request."
+    }, statusCode: 503);
 
 static IResult? ValidateStockRequest(string? key, string keyName, List<StockItemDto> items)
 {

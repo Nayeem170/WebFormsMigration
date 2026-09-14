@@ -21,11 +21,26 @@ var dbPath = !string.IsNullOrEmpty(dbPathSetting)
 
 var catalogBaseUrl = builder.Configuration["Services:Catalog:BaseUrl"] ?? "http://localhost:8094";
 
+var provider = builder.Configuration["Database:Provider"] ?? "sqlite";
+var usePostgres = string.Equals(provider, "postgres", StringComparison.OrdinalIgnoreCase);
+if (usePostgres)
+{
+    var connectionString = builder.Configuration["Database:ConnectionString"];
+    if (string.IsNullOrEmpty(connectionString))
+        throw new InvalidOperationException("Database:ConnectionString is required when Database:Provider is postgres.");
+    builder.Services.AddScoped<AppDbContext>(_ => new PostgresAppDbContext(connectionString));
+}
+else
+{
+    builder.Services.AddScoped<AppDbContext>(_ => new SqliteAppDbContext(dbPath));
+}
+
+var runAsMigrator = args.Contains("--migrate");
+var migrateOnStartup = runAsMigrator || builder.Configuration.GetValue<bool?>("Database:Migrate") == true;
+
 var logPath = Path.Combine(builder.Environment.ContentRootPath, "App_Data", "logs", "app.log");
 Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
 builder.Logging.AddProvider(new FileLoggerProvider(logPath));
-
-builder.Services.AddScoped<AppDbContext>(_ => new AppDbContext(dbPath));
 
 var app = builder.Build();
 
@@ -50,19 +65,45 @@ app.Use(async (context, next) =>
     }
 });
 
-using (var scope = app.Services.CreateScope())
+if (migrateOnStartup)
 {
-    var dbDir = Path.GetDirectoryName(dbPath);
-    if (!string.IsNullOrEmpty(dbDir))
-        Directory.CreateDirectory(dbDir);
+    using (var scope = app.Services.CreateScope())
+    {
+        if (!usePostgres)
+        {
+            var dbDir = Path.GetDirectoryName(dbPath);
+            if (!string.IsNullOrEmpty(dbDir))
+                Directory.CreateDirectory(dbDir);
+        }
 
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.Migrate();
-    db.Database.OpenConnection();
-    db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
-    db.Database.CloseConnection();
-    if (!db.Orders.Any())
-        new DbSeeder(db).Seed();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        if (usePostgres)
+        {
+            db.Database.OpenConnection();
+            db.Database.ExecuteSqlRaw("SELECT pg_advisory_lock(94002);");
+            try
+            {
+                db.Database.Migrate();
+            }
+            finally
+            {
+                db.Database.ExecuteSqlRaw("SELECT pg_advisory_unlock(94002);");
+                db.Database.CloseConnection();
+            }
+        }
+        else
+        {
+            db.Database.Migrate();
+            db.Database.OpenConnection();
+            db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
+            db.Database.CloseConnection();
+        }
+        if (!db.Orders.Any())
+            new DbSeeder(db).Seed();
+    }
+
+    if (runAsMigrator)
+        return;
 }
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
