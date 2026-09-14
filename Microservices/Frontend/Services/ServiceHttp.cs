@@ -15,26 +15,37 @@ namespace CoreWebForms.Services
             Timeout = CallTimeout
         };
 
-        internal static HttpResponseMessage Send(Func<HttpRequestMessage> requestFactory, bool retryOnFailure)
+        internal static HttpResponseMessage Send(Func<string, HttpRequestMessage> requestFactory, bool retryOnFailure, ServiceEndpointPool pool)
         {
             const int maxAttempts = 3;
             for (var attempt = 1; ; attempt++)
             {
+                var endpoint = pool.Next();
                 try
                 {
-                    var request = requestFactory();
+                    var request = requestFactory(endpoint);
                     request.Headers.Add(CorrelationHeader.Name, Correlation.Current());
-                    return _client.Send(request);
+                    var response = _client.Send(request);
+                    pool.ReportSuccess(endpoint);
+                    return response;
                 }
-                catch (HttpRequestException) when (retryOnFailure && attempt < maxAttempts)
+                catch (HttpRequestException)
                 {
-                    Thread.Sleep(200);
+                    if (!ReportAndContinue(pool, endpoint, retryOnFailure, attempt, maxAttempts)) throw;
                 }
-                catch (TaskCanceledException) when (retryOnFailure && attempt < maxAttempts)
+                catch (TaskCanceledException)
                 {
-                    Thread.Sleep(200);
+                    if (!ReportAndContinue(pool, endpoint, retryOnFailure, attempt, maxAttempts)) throw;
                 }
             }
+        }
+
+        private static bool ReportAndContinue(ServiceEndpointPool pool, string endpoint, bool retryOnFailure, int attempt, int maxAttempts)
+        {
+            pool.ReportFailure(endpoint);
+            if (!retryOnFailure || attempt >= maxAttempts) return false;
+            Thread.Sleep(200);
+            return true;
         }
     }
 }

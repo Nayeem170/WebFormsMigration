@@ -16,6 +16,9 @@ namespace CoreWebForms
 {
     public class Program
     {
+        private static readonly string InstanceId =
+            Environment.MachineName + ":" + Process.GetCurrentProcess().Id;
+
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
@@ -32,7 +35,7 @@ namespace CoreWebForms
                 redisOptions.AbortOnConnectFail = true;
                 var multiplexer = StackExchange.Redis.ConnectionMultiplexer.Connect(redisOptions);
                 SessionState.Multiplexer = multiplexer;
-                builder.Services.AddSingleton(multiplexer);
+                builder.Services.AddSingleton<StackExchange.Redis.IConnectionMultiplexer>(multiplexer);
                 builder.Services.AddStackExchangeRedisCache(options =>
                 {
                     options.ConfigurationOptions = redisOptions;
@@ -71,6 +74,7 @@ namespace CoreWebForms
                     : incoming;
                 context.Items["CorrelationId"] = correlationId;
                 context.Response.Headers[CorrelationHeader.Name] = correlationId;
+                context.Response.Headers["X-Instance"] = InstanceId;
                 await next(context);
             });
 
@@ -82,23 +86,6 @@ namespace CoreWebForms
             var sessionReady = false;
 
             var contentRoot = app.Environment.ContentRootPath;
-
-            var dbPathSetting = builder.Configuration["Database:Path"];
-            var dbPath = !string.IsNullOrEmpty(dbPathSetting)
-                ? dbPathSetting
-                : Path.Combine(contentRoot, builder.Configuration["Database:RelativePath"] ?? "App_Data/inventory.db");
-            var productsModeText = builder.Configuration["Services:Products:Mode"];
-            var productsMode = ServiceMode.InProcess;
-            if (!string.IsNullOrEmpty(productsModeText) && !Enum.TryParse<ServiceMode>(productsModeText, ignoreCase: true, out productsMode))
-                throw new InvalidOperationException(string.Format("Unknown Services:Products:Mode value '{0}'.", productsModeText));
-            var productsBaseUrl = builder.Configuration["Services:Products:BaseUrl"];
-            var ordersModeText = builder.Configuration["Services:Orders:Mode"];
-            var ordersMode = ServiceMode.InProcess;
-            if (!string.IsNullOrEmpty(ordersModeText) && !Enum.TryParse<ServiceMode>(ordersModeText, ignoreCase: true, out ordersMode))
-                throw new InvalidOperationException(string.Format("Unknown Services:Orders:Mode value '{0}'.", ordersModeText));
-            var ordersBaseUrl = builder.Configuration["Services:Orders:BaseUrl"];
-            var runMigrations = builder.Configuration.GetValue<bool?>("Database:Migrate") ?? true;
-            AppData.Initialize(dbPath, productsMode, productsBaseUrl, runMigrations, ordersMode, ordersBaseUrl);
 
             if (Trace.Listeners["console"] == null)
             {
@@ -122,13 +109,48 @@ namespace CoreWebForms
             catch (UnauthorizedAccessException) { }
             Trace.AutoFlush = true;
 
+            var dbPathSetting = builder.Configuration["Database:Path"];
+            var dbPath = !string.IsNullOrEmpty(dbPathSetting)
+                ? dbPathSetting
+                : Path.Combine(contentRoot, builder.Configuration["Database:RelativePath"] ?? "App_Data/inventory.db");
+            var productsModeText = builder.Configuration["Services:Products:Mode"];
+            var productsMode = ServiceMode.InProcess;
+            if (!string.IsNullOrEmpty(productsModeText) && !Enum.TryParse<ServiceMode>(productsModeText, ignoreCase: true, out productsMode))
+                throw new InvalidOperationException(string.Format("Unknown Services:Products:Mode value '{0}'.", productsModeText));
+            var productsBaseUrl = builder.Configuration["Services:Products:BaseUrl"];
+            var ordersModeText = builder.Configuration["Services:Orders:Mode"];
+            var ordersMode = ServiceMode.InProcess;
+            if (!string.IsNullOrEmpty(ordersModeText) && !Enum.TryParse<ServiceMode>(ordersModeText, ignoreCase: true, out ordersMode))
+                throw new InvalidOperationException(string.Format("Unknown Services:Orders:Mode value '{0}'.", ordersModeText));
+            var ordersBaseUrl = builder.Configuration["Services:Orders:BaseUrl"];
+            var runMigrations = builder.Configuration.GetValue<bool?>("Database:Migrate") ?? true;
+            AppData.Initialize(dbPath, productsMode, productsBaseUrl, runMigrations, ordersMode, ordersBaseUrl);
+
             app.MapGet("/favicon.ico", () => Results.File(
                 Path.Combine(contentRoot, "favicon.ico"), "image/x-icon"));
 
             app.MapGet("/health/live", () => Results.Ok(new { status = "alive" }));
-            app.MapGet("/health/ready", () => sessionReady
-                ? Results.Ok(new { status = "ready" })
-                : Results.Json(new { status = "warming" }, statusCode: 503));
+            app.MapGet("/health/ready", async () =>
+            {
+                if (!sessionReady)
+                    return Results.Json(new { status = "warming" }, statusCode: 503);
+                var multiplexer = app.Services.GetService<StackExchange.Redis.IConnectionMultiplexer>();
+                if (multiplexer != null)
+                {
+                    try
+                    {
+                        var ping = multiplexer.GetDatabase().PingAsync();
+                        var winner = await Task.WhenAny(ping, Task.Delay(500));
+                        if (winner != ping || !ping.IsCompletedSuccessfully)
+                            return Results.Json(new { status = "session-store-unreachable" }, statusCode: 503);
+                    }
+                    catch
+                    {
+                        return Results.Json(new { status = "session-store-unreachable" }, statusCode: 503);
+                    }
+                }
+                return Results.Ok(new { status = "ready" });
+            });
 
             foreach (var staticPath in new[] { "Content", "Scripts", "Pages" })
             {

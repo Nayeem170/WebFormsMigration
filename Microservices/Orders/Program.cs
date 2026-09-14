@@ -20,6 +20,7 @@ var dbPath = !string.IsNullOrEmpty(dbPathSetting)
         builder.Configuration["Database:RelativePath"] ?? "App_Data/inventory.db");
 
 var catalogBaseUrl = builder.Configuration["Services:Catalog:BaseUrl"] ?? "http://localhost:8094";
+var catalogPool = new ServiceEndpointPool(catalogBaseUrl);
 
 var provider = builder.Configuration["Database:Provider"] ?? "sqlite";
 var usePostgres = string.Equals(provider, "postgres", StringComparison.OrdinalIgnoreCase);
@@ -49,6 +50,11 @@ catch (UnauthorizedAccessException) { }
 
 var app = builder.Build();
 
+app.Logger.LogInformation("Catalog endpoint pool: {Count} endpoint(s): {Endpoints}",
+    catalogPool.Endpoints.Count, string.Join(", ", catalogPool.Endpoints));
+
+var instanceId = Environment.MachineName + ":" + Process.GetCurrentProcess().Id;
+
 app.Use(async (context, next) =>
 {
     var incoming = context.Request.Headers[CorrelationHeader.Name].ToString();
@@ -57,6 +63,7 @@ app.Use(async (context, next) =>
         : incoming;
     context.Items[CorrelationHeader.Name] = correlationId;
     context.Response.Headers[CorrelationHeader.Name] = correlationId;
+    context.Response.Headers["X-Instance"] = instanceId;
     var stopwatch = Stopwatch.StartNew();
     try
     {
@@ -160,7 +167,7 @@ app.MapPost("/api/orders", (OrderDto dto, HttpContext http, AppDbContext db) =>
 
     try
     {
-        CatalogClient.Reserve(catalogBaseUrl, new ReserveStockRequest
+        CatalogClient.Reserve(catalogPool, new ReserveStockRequest
         {
             ReservationKey = reservationKey,
             Items = stockItems
@@ -189,7 +196,7 @@ app.MapPost("/api/orders", (OrderDto dto, HttpContext http, AppDbContext db) =>
     {
         try
         {
-            CatalogClient.Release(catalogBaseUrl, new ReleaseStockRequest
+            CatalogClient.Release(catalogPool, new ReleaseStockRequest
             {
                 ReleaseKey = "reserve:" + reservationKey,
                 Items = stockItems
@@ -241,7 +248,7 @@ app.MapDelete("/api/orders/{id:int}", (int id, HttpContext http, AppDbContext db
 
     try
     {
-        CatalogClient.Release(catalogBaseUrl, new ReleaseStockRequest
+        CatalogClient.Release(catalogPool, new ReleaseStockRequest
         {
             ReleaseKey = "order:" + order.Id,
             Items = order.Items

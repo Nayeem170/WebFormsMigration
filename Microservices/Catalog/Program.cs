@@ -47,6 +47,8 @@ var migrateOnStartup = runAsMigrator || builder.Configuration.GetValue<bool?>("D
 
 var app = builder.Build();
 
+var instanceId = Environment.MachineName + ":" + Process.GetCurrentProcess().Id;
+
 app.Use(async (context, next) =>
 {
     var incoming = context.Request.Headers[CorrelationHeader.Name].ToString();
@@ -55,6 +57,7 @@ app.Use(async (context, next) =>
         : incoming;
     context.Items[CorrelationHeader.Name] = correlationId;
     context.Response.Headers[CorrelationHeader.Name] = correlationId;
+    context.Response.Headers["X-Instance"] = instanceId;
     var stopwatch = Stopwatch.StartNew();
     try
     {

@@ -26,26 +26,40 @@ namespace Orders{
         };
         private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
 
-        public static void Reserve(string baseUrl, ReserveStockRequest request, string? correlationId = null)
-            => SendStockCall(baseUrl.TrimEnd('/') + "/api/products/reserve", request, correlationId);
+        public static void Reserve(ServiceEndpointPool pool, ReserveStockRequest request, string? correlationId = null)
+            => SendStockCall(pool, "/api/products/reserve", request, correlationId);
 
-        public static void Release(string baseUrl, ReleaseStockRequest request, string? correlationId = null)
-            => SendStockCall(baseUrl.TrimEnd('/') + "/api/products/release", request, correlationId);
+        public static void Release(ServiceEndpointPool pool, ReleaseStockRequest request, string? correlationId = null)
+            => SendStockCall(pool, "/api/products/release", request, correlationId);
 
-        private static void SendStockCall(string url, object request, string? correlationId)
+        private static void SendStockCall(ServiceEndpointPool pool, string path, object request, string? correlationId)
         {
             for (var attempt = 1; ; attempt++)
             {
+                var endpoint = pool.Next();
+                HttpResponseMessage response;
                 try
                 {
-                    using var message = new HttpRequestMessage(HttpMethod.Post, url)
+                    using var message = new HttpRequestMessage(HttpMethod.Post, endpoint + path)
                     {
                         Content = new StringContent(
                             JsonSerializer.Serialize(request, _jsonOptions), Encoding.UTF8, "application/json")
                     };
                     if (!string.IsNullOrEmpty(correlationId))
                         message.Headers.Add(CorrelationHeader.Name, correlationId);
-                    using var response = _client.Send(message);
+                    response = _client.Send(message);
+                    pool.ReportSuccess(endpoint);
+                }
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+                {
+                    pool.ReportFailure(endpoint);
+                    if (attempt >= MaxAttempts)
+                        throw;
+                    Thread.Sleep(200);
+                    continue;
+                }
+                using (response)
+                {
                     if (response.IsSuccessStatusCode)
                         return;
                     var body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
@@ -56,16 +70,13 @@ namespace Orders{
                             error?.ErrorCode ?? "StockRule",
                             error?.Message ?? "Catalog rejected the stock call.");
                     }
+                    if (attempt < MaxAttempts)
+                    {
+                        Thread.Sleep(200);
+                        continue;
+                    }
                     throw new HttpRequestException(
                         string.Format("Catalog stock call failed: {0} {1}", (int)response.StatusCode, body));
-                }
-                catch (HttpRequestException) when (attempt < MaxAttempts)
-                {
-                    Thread.Sleep(200);
-                }
-                catch (TaskCanceledException) when (attempt < MaxAttempts)
-                {
-                    Thread.Sleep(200);
                 }
             }
         }

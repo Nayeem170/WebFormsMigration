@@ -14,13 +14,15 @@ namespace CoreWebForms.Services
     public class HttpOrderService : IOrderService
     {
         private static readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-        private readonly string _baseUrl;
+        private readonly ServiceEndpointPool _pool;
         private readonly ILogger _log;
 
-        public HttpOrderService(string baseUrl, ILogger log)
+        public HttpOrderService(string baseUrlList, ILogger log)
         {
-            _baseUrl = baseUrl.TrimEnd('/');
+            _pool = new ServiceEndpointPool(baseUrlList);
             _log = log;
+            _log.Info(string.Format("Orders endpoint pool: {0} endpoint(s): {1}",
+                _pool.Endpoints.Count, string.Join(", ", _pool.Endpoints)));
         }
 
         public List<Order> GetAll(bool includeDeleted = false)
@@ -136,7 +138,7 @@ namespace CoreWebForms.Services
 
         private HttpResponseMessage Send(HttpMethod method, string path, object? body = null)
         {
-            var response = ServiceHttp.Send(() => BuildRequest(method, path, body), method == HttpMethod.Get);
+            var response = ServiceHttp.Send(endpoint => BuildRequest(method, endpoint, path, body), method == HttpMethod.Get, _pool);
             if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotFound)
                 return response;
 
@@ -155,9 +157,9 @@ namespace CoreWebForms.Services
             throw new HttpRequestException(summary);
         }
 
-        private HttpRequestMessage BuildRequest(HttpMethod method, string path, object? body)
+        private HttpRequestMessage BuildRequest(HttpMethod method, string endpoint, string path, object? body)
         {
-            var request = new HttpRequestMessage(method, _baseUrl + path);
+            var request = new HttpRequestMessage(method, endpoint + path);
             if (body != null)
                 request.Content = new StringContent(
                     JsonSerializer.Serialize(body, _jsonOptions), Encoding.UTF8, "application/json");
