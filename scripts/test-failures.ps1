@@ -30,15 +30,29 @@ function Check([string]$name, [bool]$ok) {
     if ($ok) { Write-Host "PASS $name" } else { Write-Host "FAIL $name"; $script:failures++ }
 }
 
-function Get-PoolCounts([string]$logs, [string]$poolName) {
-    [regex]::Matches($logs, ("{0} endpoint pool: (\d+) endpoint" -f $poolName)) | ForEach-Object { [int]$_.Groups[1].Value }
+function Get-ServicePoolEntries([string]$service, [string]$poolName) {
+    # Log prefixes are KEPT ("<container>  | message") so pool counts are
+    # attributed per container; a single noisy replica cannot mask another
+    # replica's missing or wrong-count line.
+    $pattern = '^(\S+)\s*\|\s+.*' + $poolName + ' endpoint pool: (\d+) endpoint'
+    docker compose logs $service 2>$null | Where-Object { $_ -match $pattern } | ForEach-Object {
+        [pscustomobject]@{ Container = $Matches[1]; Count = [int]$Matches[2] }
+    }
 }
 
-function Test-PoolCounts([int[]]$counts, [int]$expected, [int]$minLines) {
-    # Every logged pool line must report exactly $expected endpoints (a missed
-    # override falls back to the single-endpoint default and still logs - the
-    # COUNT is what fails it), and both replicas must have logged at all.
-    ($counts.Count -ge $minLines) -and (($counts | Where-Object { $_ -ne $expected }).Count -eq 0)
+function Test-ServicePool([string]$service, [string]$poolName, [int]$expected) {
+    # Every RUNNING container of the service (per `compose ps`, not log
+    # counting) must have logged the pool with exactly $expected endpoints.
+    # Fails closed: unparsable prefixes or a replica that never logged
+    # cannot match a ps name.
+    $entries = @(Get-ServicePoolEntries $service $poolName)
+    $running = @(docker compose ps $service --format json 2>$null | ConvertFrom-Json | ForEach-Object { $_.Name })
+    if ($running.Count -lt 1) { return $false }
+    foreach ($name in $running) {
+        $mine = @($entries | Where-Object { $name.EndsWith($_.Container) })
+        if ($mine.Count -lt 1 -or @($mine | Where-Object { $_.Count -ne $expected }).Count -gt 0) { return $false }
+    }
+    return $true
 }
 
 function Get-Dashboard() {
@@ -168,6 +182,9 @@ Check 'correlation id echoed by Catalog response header' ($echoedCatalog -eq $co
 Req Delete "$OrdersUrl/api/orders/$probeOrderId" | Out-Null
 
 function Read-ServiceLog([string]$logPath, [string]$service) {
+    # Aggregated across replicas ON PURPOSE (--no-log-prefix): the correlation
+    # checks only need "some replica logged this id". Per-replica attribution
+    # lives in Get-ServicePoolEntries, which keeps prefixes.
     if ($Topology -eq 'compose') { return (docker compose logs --no-log-prefix $service 2>$null | Out-String) }
     return (Get-Content $logPath -Raw)
 }
@@ -200,18 +217,14 @@ if ($Topology -eq 'compose') {
     $gwMinted = ($r.Headers['X-Correlation-ID'] | Select-Object -First 1)
     Check 'gateway mints correlation id when absent' ($null -ne $gwMinted -and $gwMinted.Length -eq 32)
 
-    $feLogs = (docker compose logs --no-log-prefix frontend 2>$null | Out-String) + (docker compose logs --no-log-prefix frontend2 2>$null | Out-String)
-    $ordersLogs = docker compose logs --no-log-prefix orders 2>$null | Out-String
-
     # Pool sizes for the CURRENT compose shape (1 catalog, 1 orders). Phase 5
     # doubles the services; bump $expectedPoolEndpoints there WITH the shape.
+    # Attribution is per container (see Test-ServicePool), so a stale
+    # frontend2 image logging a different pool than frontend fails.
     $expectedPoolEndpoints = 1
 
-    $feCatalogCounts = Get-PoolCounts $feLogs 'Catalog'
-    $feOrdersCounts = Get-PoolCounts $feLogs 'Orders'
-    $ordersCatalogCounts = Get-PoolCounts $ordersLogs 'Catalog'
-    Check 'frontend logs resolved endpoint pools' ((Test-PoolCounts $feCatalogCounts $expectedPoolEndpoints 2) -and (Test-PoolCounts $feOrdersCounts $expectedPoolEndpoints 2))
-    Check 'orders logs resolved catalog endpoint pool' (Test-PoolCounts $ordersCatalogCounts $expectedPoolEndpoints 1)
+    Check 'frontend logs resolved endpoint pools' ((Test-ServicePool 'frontend' 'Catalog' $expectedPoolEndpoints) -and (Test-ServicePool 'frontend' 'Orders' $expectedPoolEndpoints))
+    Check 'orders logs resolved catalog endpoint pool' (Test-ServicePool 'orders' 'Catalog' $expectedPoolEndpoints)
 }
 
 Check 'stopped Catalog' (Stop-CatalogSvc)

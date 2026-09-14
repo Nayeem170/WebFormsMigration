@@ -775,12 +775,15 @@ Phase 4 execution record (2026-09-14):
   ServiceHttp/HttpProductService/HttpOrderService and Orders' CatalogClient
   select an endpoint per ATTEMPT so retries naturally fail over. Each pool
   logs its resolved endpoint count at startup ("Catalog endpoint pool:
-  N endpoint(s): ...") and the suite parses the COUNT from every replica's
-  pool lines and asserts it equals the shape's expected size (bumped with
-  the shape in Phase 5) - a missed override that falls back to the
-  single-endpoint appsettings default fails the suite, not just the logs.
-  Teeth verified directly: expecting 2 against a live 1-endpoint pool
-  fails the assertion. Frontend's pool
+  N endpoint(s): ...") and the suite attributes every pool line to its
+  container - log prefixes kept, containers cross-checked against
+  `docker compose ps` names - then asserts each RUNNING container logged
+  exactly the shape's expected endpoint count (bumped with the shape in
+  Phase 5). A missed override falling back to the single-endpoint
+  appsettings default fails, and so does a replica that never logged;
+  attribution fails closed because an unparsable prefix cannot match a ps
+  name. Teeth verified directly: expecting 2 against a live 1-endpoint
+  pool fails the assertion. Frontend's pool
   log lines initially vanished: AppData.Initialize ran before the Trace
   listeners were attached; listener setup now precedes client
   construction. Compose Phase 4 shape is deliberately 1 catalog + 1 orders
@@ -795,6 +798,19 @@ Phase 4 execution record (2026-09-14):
   frontend2; build both. And any `docker compose up` without the same -f
   override files as the original up silently recreates services under the
   base config (dropping test ports) - always pass both files.
+- Retrofit before Phase 5, same review class one level up: smoke-parity.ps1
+  was observational - content checks printed YES/NO and exited 0 either
+  way, so only a human reading the output could fail it (the Phase 3
+  Orders BaseUrl find happened exactly that way). Now fail-closed: every
+  content line is a Check, place/insufficient/delete assert 201/409/204,
+  stock arithmetic asserts baseline-3 then baseline, exit 1 on any
+  failure. Teeth verified live: with Catalog stopped the script FAILs
+  content and exits 1. The rewrite immediately caught real drift the old
+  script had been silently printing NO for: the orders list paginates and
+  repeated suite runs had pushed the seeded Karen Novak order off page 1.
+  Seeded-name assertions now live on home's bounded recent window; the
+  orders page asserts structure plus the self-referential place/
+  struck-through pair, which cannot drift.
 - Verification: failure suite 28 checks green through the gateway port in
   compose topology with Redis mode (including both-replicas, pass-through,
   mint, pool-log, Redis-503, and the kill/rejoin sequence); smoke parity
