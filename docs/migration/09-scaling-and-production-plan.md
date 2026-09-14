@@ -393,6 +393,134 @@ Rollback: config flip back to the sqlite provider and the untouched files
 until the Postgres run is verified; after data diverges, rollback is a data
 migration (same boundary shape as Phase 6 of the previous plan - state it).
 
+Phase 2 execution record (2026-09-14):
+
+- Postgres: `ccw-postgres` container (postgres:17-alpine), published
+  `127.0.0.1:15432`. Topology decision: two databases (`ccw_catalog`,
+  `ccw_orders`), not one instance with schemas - the split files enforced the
+  boundary physically and two databases keep it physical, at the cost of one
+  connection string each. Roles: `postgres` owns DDL and runs the migrator;
+  `ccw_app` holds CONNECT + USAGE plus default-privilege DML grants (executed
+  BEFORE migrations so the grants cover the created tables). Services run as
+  `ccw_app` only - verified live.
+- Provider split: `Database:Provider` = `sqlite` (default) | `postgres`;
+  `Database:ConnectionString` required when postgres. Contexts split into
+  abstract `AppDbContext` + `SqliteAppDbContext`/`PostgresAppDbContext` per
+  service, with design-time factories for both. Fresh `InitialCreate` per
+  provider (sqlite `Migrations/`, pg `MigrationsPostgres/`): pg gets
+  `numeric(18,2)`, native boolean, `timestamp with time zone`. Write-side UTC
+  converters on pg DateTime properties - npgsql rejects Kind=Unspecified for
+  timestamptz; first migrator run failed on it.
+- Migrator entrypoint: `--migrate` arg applies migrations + seeds under
+  `pg_advisory_lock(94001)` (Catalog) / `94002` (Orders), then exits.
+  `Database:Migrate` flag has code default false (appsettings sets true for
+  dev convenience; env-only deployments get the false). Two racing migrators
+  serialize on the advisory lock; racing replicas find history current and
+  skip the seed.
+- Locking, final shape: items sorted by ProductId, then one
+  `FromSqlRaw("SELECT * FROM \"Products\" WHERE \"Id\" IN (...) ORDER BY
+  \"Id\" FOR UPDATE")` returning tracked entities - a single round trip that
+  both takes the locks and loads the rows (the first cut did a bare
+  `ExecuteSqlRaw` lock plus an EF `Find` per item inside the held lock;
+  collapsing it moved the N=64 sweep from goal-FAIL to PASS with no budget
+  change). SQLite branch takes the same single query without FOR UPDATE.
+  `lock_timeout=1500ms` travels in the connection string as
+  `Options=-c lock_timeout=1500` - applied in the startup packet, no extra
+  round trip per pool rent, inherited by migrator and design-time factory
+  for free (replaced a `DbConnectionInterceptor`; the guard skips the append
+  when the caller supplies own Options).
+- Exception mapping, final shape: `IsTransientLock` walks the inner exception
+  chain so a 55P03/40P01 raised by `SaveChanges` inside `DbUpdateException`
+  maps to the typed 503 `LockTimeout` - the first cut caught bare
+  `PostgresException`, which only matches the raw-SQL lock statement, and
+  the wrapped race escaped as an unhandled 500 (review-caught; reachable by
+  exactly the duplicate-key race this code exists for). SQLite branch:
+  SqliteException code 5 anywhere in the chain. Unique violations on
+  ReservationKeys/ReleaseKeys unwrap to `replayed: true` - both reserve and
+  release replay verified live (second call `replayed=true`, stock moves
+  once).
+- Concurrent-reserve sweep (single-row shape: one product, stock N, N racing
+  reserves; harness does NOT retry - raw first-attempt queue drain; the
+  Frontend's CatalogClient retries 503 3x at 200ms, so user-visible failure
+  is lower than these numbers). Budgets differ by engine and are not
+  normalized: sqlite Default Timeout 5s vs pg lock_timeout 1.5s. The table
+  is not an engine horse race; what it gates is the invariant, and the
+  failure mode:
+  - Invariant (stock never negative, never oversold): PASS at every N, both
+    engines, before and after the fixes. The gate held throughout.
+  - Failure mode: Phase 0 sqlite showed ambiguous 500s at N=128+
+    (`UNIQUE constraint failed` on committed-but-timed-out replays). pg
+    post-fix, the same rungs yield typed, retryable 503 `LockTimeout` and
+    nothing else. Corrupting-and-ambiguous -> typed-and-retryable is the
+    correctness win.
+  - Drain time is the headline, not success parity: N=8 2320ms (sqlite) ->
+    210ms (pg), N=64 4909ms -> 376ms. Equal success counts, 11-13x faster
+    to drain the same queue.
+  - Before/after the drain fixes (same budget, same N; pre-fix run numbers
+    from run notes - the file was overwritten before the rename discipline
+    landed): pre-fix pg N=64 28/64 (503x36), N=128 46/70x503, N=256
+    148/108x503. Post-fix: N=64 64/64, N=128 58/70x503, N=256 124/132x503.
+    N=64 moved from FAIL to full drain.
+  - N=128/256 still goal-FAIL on pg and are expected to: N writers on one
+    row serialize on any engine - this shape cannot show pg's real win. It
+    shows the queue drains or fails cleanly within budget.
+- k6 orders-write ladder (multi-row: order insert + reserve/release spread
+  across the seeded catalog; 20s constant-VUs; the Phase 0 baseline pair):
+
+  | VUs | sqlite iter/s | pg iter/s | sqlite fail | pg fail | sqlite p95 | pg p95 |
+  |-----|---------------|-----------|-------------|---------|------------|--------|
+  | 2   | 3.88          | 38.38     | 0.00%       | 0.00%   | 913ms      | 52ms   |
+  | 8   | 4.83          | 67.98     | 0.49%       | 0.00%   | 2.48s      | 153ms  |
+  | 16  | 2.50          | 53.37     | 3.93%       | 0.00%   | 8.86s      | 399ms  |
+  | 32  | 3.17          | 25.24     | 10.00%      | 0.87%   | 12.55s     | 3.32s  |
+
+  ~14x throughput at 8 VUs, zero failures through 16 VUs (sqlite collapsed
+  at 16+), collapse point moved past 32 VUs. Two independent measurements -
+  single-row sweep and multi-row k6 - same direction. "Write ceiling
+  measurably raised" is these numbers.
+- DbCopy (`Microservices/tools/DbCopy`, plain Microsoft.Data.Sqlite + Npgsql,
+  no EF or service references): TRUNCATE + RESTART IDENTITY, explicit-id
+  inserts (UTC-stamped DateTimes, int bools, text decimals to numeric),
+  then `setval` via `pg_get_serial_sequence` and a probe insert per table
+  asserting the returned Id exceeds the copied max (13>12 products, 14>13
+  orders, 17>16 items) - IdentityByDefaultColumn does not advance sequences
+  on explicit-id copies and the first new insert would otherwise collide on
+  PK in Phase 3 as a mystery. Verification is value-based, not row counts:
+  SUM(Price), SUM(Stock), SUM(Total), per-order Total == sum of item lines
+  on both engines. Run green: sqlite backup (12 products/451 stock, 13
+  orders/16 items, 1 reservation + 1 release key) now lives in pg.
+- Data state: sqlite files backed up to `artifacts/phase2/backup/` before
+  any pg work; the backup is the DbCopy source of record. pg now holds the
+  migrated dev data; canonical reseed = drop/recreate both DBs + grants +
+  migrator (scripted; requires `pg_terminate_backend` first - live pooled
+  connections block DROP, and the services briefly 500 while npgsql prunes
+  the killed connections, self-healing within seconds).
+- Verification: 11/11 characterization facts on pg (pre-fix and post-fix
+  builds) and on the sqlite regression pass; failure suite 18/18 in pg mode
+  (new `-PgMode` switch passes Database env to suite-spawned service
+  processes) and 18/18 memory mode unchanged from Phase 1; smoke parity
+  green on both stacks (place -> reserve decrements, delete -> release
+  restores). sqlite regression required wiping `App_Data/*.db*` and letting
+  Migrate reseed - the regenerated migrations changed history ids and the
+  old files carried stale ones.
+- Artifacts: `artifacts/phase2/concurrent-reserve-sqlite-baseline.md` (the
+  full 6-rung Phase 0-era sqlite ladder - the only surviving copy; it was
+  briefly mislabeled `-pg`, caught in review), `concurrent-reserve-pg.md`
+  (post-fix 4-rung pg sweep), `concurrent-reserve-sqlite-regression.md`
+  (2-rung regression pass), `failures-pg-run.txt` (18/18),
+  `load/results/20260914-133445-orders-write-pg-vus*.txt` (k6 ladder).
+- Env notes for reruns: `pwsh -File script.ps1 -Ns 8,64,128,256` can
+  culture-parse the comma list as one integer (864128256) and fail create
+  with 400 - run sweeps via `pwsh -Command "& script -Ns @(8,64,128,256)"`.
+  `dotnet ef migrations add` builds before scaffolding - rebuild before
+  running a migrator off new migration files, or it runs stale DLLs. psql
+  quoting under pwsh is unreliable inline; pipe SQL from a temp file.
+- Exit criteria, met: sweep invariant green on pg; raced replay returns
+  `replayed: true` not 500; all suites green on both providers; write
+  ceiling raised with numbers; migrations/seed via migrator entrypoint
+  only; sqlite remains runnable as local default (wipe-and-reseed protocol
+  documented above).
+
 ### Phase 3 - Containers and compose
 
 Goal: the whole stack reproducible with one command, ready for replicas.
