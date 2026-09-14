@@ -1,12 +1,18 @@
 param(
-    [string]$BaseUrl = 'http://localhost:8081',
-    [string]$CatalogUrl = 'http://localhost:8094',
-    [string]$OrdersUrl = 'http://localhost:8095',
-    [switch]$RedisMode,
-    [string]$RedisStopCommand = 'docker stop ccw-redis',
-    [string]$RedisStartCommand = 'docker start ccw-redis',
-    [switch]$PgMode
+[string]$BaseUrl = 'http://localhost:8081',
+[string]$CatalogUrl = 'http://localhost:8094',
+[string]$OrdersUrl = 'http://localhost:8095',
+[switch]$RedisMode,
+[string]$RedisStopCommand = '',
+[string]$RedisStartCommand = '',
+[ValidateSet('local', 'compose')]
+[string]$Topology = 'local',
+[switch]$PgMode
 )
+if ($Topology -eq 'compose') {
+    if (-not $RedisStopCommand) { $RedisStopCommand = 'docker compose stop redis' }
+    if (-not $RedisStartCommand) { $RedisStartCommand = 'docker compose start redis' }
+}
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -42,6 +48,11 @@ function Stop-ServicePort([int]$port) {
 }
 
 function Start-Catalog() {
+    if ($Topology -eq 'compose') {
+        docker compose start catalog | Out-Null
+        Wait-Healthy $CatalogUrl 90 | Out-Null
+        return
+    }
     $p = @{ FilePath = 'dotnet'; ArgumentList = (Join-Path $root 'Microservices\Catalog\bin\Debug\net9.0\Catalog.dll'); WorkingDirectory = (Join-Path $root 'Microservices\Catalog'); WindowStyle = 'Hidden' }
     if ($PgMode) { $p.Environment = @{ Database__Provider = 'postgres'; Database__ConnectionString = 'Host=127.0.0.1;Port=15432;Database=ccw_catalog;Username=ccw_app;Password=localdev'; Database__Migrate = 'false' } }
     Start-Process @p
@@ -49,10 +60,25 @@ function Start-Catalog() {
 }
 
 function Start-Orders() {
+    if ($Topology -eq 'compose') {
+        docker compose start orders | Out-Null
+        Wait-Healthy $OrdersUrl 90 | Out-Null
+        return
+    }
     $p = @{ FilePath = 'dotnet'; ArgumentList = (Join-Path $root 'Microservices\Orders\bin\Debug\net9.0\Orders.dll'); WorkingDirectory = (Join-Path $root 'Microservices\Orders'); WindowStyle = 'Hidden' }
     if ($PgMode) { $p.Environment = @{ Database__Provider = 'postgres'; Database__ConnectionString = 'Host=127.0.0.1;Port=15432;Database=ccw_orders;Username=ccw_app;Password=localdev'; Database__Migrate = 'false' } }
     Start-Process @p
     Wait-Healthy $OrdersUrl 60 | Out-Null
+}
+
+function Stop-CatalogSvc() {
+    if ($Topology -eq 'compose') { docker compose stop catalog | Out-Null; return $true }
+    return Stop-ServicePort 8094
+}
+
+function Stop-OrdersSvc() {
+    if ($Topology -eq 'compose') { docker compose stop orders | Out-Null; return $true }
+    return Stop-ServicePort 8095
 }
 
 function Req($method, $url, $body, $headers = $null) {
@@ -115,20 +141,29 @@ $probeOrder = @{
 $r = Req Post "$OrdersUrl/api/orders" $probeOrder @{ 'X-Correlation-ID' = $corrId }
 $probeOrderId = $r.Content.Trim('"')
 Start-Sleep -Seconds 1
-Check 'correlation id reaches Orders log' ((Get-Content $ordersLog -Raw) -match [regex]::Escape($corrId))
-Check 'correlation id forwarded to Catalog log' ((Get-Content $catalogLog -Raw) -match [regex]::Escape($corrId))
+$echoedOrders = ($r.Headers['X-Correlation-ID'] | Select-Object -First 1)
+Check 'correlation id echoed by Orders response header' ($echoedOrders -eq $corrId)
+$r = Req Get "$CatalogUrl/api/products/1" $null @{ 'X-Correlation-ID' = $corrId }
+$echoedCatalog = ($r.Headers['X-Correlation-ID'] | Select-Object -First 1)
+Check 'correlation id echoed by Catalog response header' ($echoedCatalog -eq $corrId)
 Req Delete "$OrdersUrl/api/orders/$probeOrderId" | Out-Null
 
-$frontendCorr = $null
-Get-Dashboard | Out-Null
-Start-Sleep -Seconds 1
-$lastCorr = (Select-String -Path $frontendLog -Pattern '\[corr ([0-9a-f]{32})\] HTTP GET / -> 200' | Select-Object -Last 1).Matches[0].Groups[1].Value
-Check 'Frontend mints correlation id on page GET' ($null -ne $lastCorr -and $lastCorr.Length -eq 32)
-if ($lastCorr) {
-    Check 'Frontend correlation id reaches Catalog log' ((Get-Content $catalogLog -Raw) -match [regex]::Escape($lastCorr))
+function Read-ServiceLog([string]$logPath, [string]$service) {
+    if ($Topology -eq 'compose') { return (docker compose logs --no-log-prefix $service 2>$null | Out-String) }
+    return (Get-Content $logPath -Raw)
 }
 
-Check 'stopped Catalog by port' (Stop-ServicePort 8094)
+$frontendCorr = $null
+$r = Get-Dashboard
+Start-Sleep -Seconds 1
+$mintedHeader = ($r.Headers['X-Correlation-ID'] | Select-Object -First 1)
+Check 'Frontend mints correlation id on page GET' ($null -ne $mintedHeader -and $mintedHeader.Length -eq 32)
+if ($mintedHeader) {
+    Check 'Frontend correlation id reaches Catalog log' ((Read-ServiceLog $catalogLog 'catalog') -match [regex]::Escape($mintedHeader))
+}
+Check 'correlation id forwarded to Catalog log' ((Read-ServiceLog $catalogLog 'catalog') -match [regex]::Escape($corrId))
+
+Check 'stopped Catalog' (Stop-CatalogSvc)
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $page = Get-Dashboard
 $sw.Stop()
@@ -142,7 +177,7 @@ Start-Catalog
 $page = Get-Dashboard
 Check 'Frontend recovers after Catalog restart (no Frontend restart)' ($page.StatusCode -eq 200 -and $page.Content -notmatch 'Catalog is unavailable right now')
 
-Check 'stopped Orders by port' (Stop-ServicePort 8095)
+Check 'stopped Orders' (Stop-OrdersSvc)
 $page = Get-Dashboard
 Check 'dashboard degrades with Orders down' ($page.StatusCode -eq 200 -and $page.Content -match 'Orders is unavailable right now')
 $ordersDown = $false
