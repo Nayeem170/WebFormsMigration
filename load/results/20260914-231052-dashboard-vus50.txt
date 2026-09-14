@@ -1,0 +1,29 @@
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 12290   816.709285/s
+    checks_succeeded...: 100.00% 12290 out of 12290
+    checks_failed......: 0.00%   0 out of 12290
+
+    ✓ dashboard 200
+    ✓ dashboard not degraded
+
+    HTTP
+    http_req_duration..............: avg=121.99ms min=8.37ms med=96.56ms max=2.85s p(90)=156.08ms p(95)=173.33ms
+      { expected_response:true }...: avg=121.99ms min=8.37ms med=96.56ms max=2.85s p(90)=156.08ms p(95)=173.33ms
+    http_req_failed................: 0.00%  0 out of 6145
+    http_reqs......................: 6145   408.354642/s
+
+    EXECUTION
+    iteration_duration.............: avg=122.23ms min=8.37ms med=96.68ms max=2.85s p(90)=156.31ms p(95)=173.53ms
+    iterations.....................: 6145   408.354642/s
+    vus............................: 50     min=50        max=50
+    vus_max........................: 50     min=50        max=50
+
+    NETWORK
+    data_received..................: 82 MB  5.4 MB/s
+    data_sent......................: 430 kB 29 kB/s
+
+
+

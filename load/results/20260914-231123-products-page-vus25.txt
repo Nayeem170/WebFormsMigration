@@ -1,0 +1,28 @@
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 17561   1169.596158/s
+    checks_succeeded...: 100.00% 17561 out of 17561
+    checks_failed......: 0.00%   0 out of 17561
+
+    ✓ products page 200
+
+    HTTP
+    http_req_duration..............: avg=21.26ms min=2.59ms med=19.93ms max=91.08ms p(90)=31.87ms p(95)=36.6ms 
+      { expected_response:true }...: avg=21.26ms min=2.59ms med=19.93ms max=91.08ms p(90)=31.87ms p(95)=36.6ms 
+    http_req_failed................: 0.00%  0 out of 17561
+    http_reqs......................: 17561  1169.596158/s
+
+    EXECUTION
+    iteration_duration.............: avg=21.35ms min=3.11ms med=20ms    max=91.08ms p(90)=31.99ms p(95)=36.69ms
+    iterations.....................: 17561  1169.596158/s
+    vus............................: 25     min=25         max=25
+    vus_max........................: 25     min=25         max=25
+
+    NETWORK
+    data_received..................: 232 MB 16 MB/s
+    data_sent......................: 1.5 MB 99 kB/s
+
+
+
