@@ -304,7 +304,7 @@ static IResult StockRuleError(string errorCode, string message)
     {
         for (var e = ex; e != null; e = e.InnerException)
         {
-            if (e is PostgresException pg && pg.SqlState is "55P03" or "40P01") return true;
+            if (e is PostgresException pg && pg.SqlState is "55P03" or "40P01" or "53300") return true;
             if (e is SqliteException sql && sql.SqliteErrorCode == 5) return true;
         }
         return false;

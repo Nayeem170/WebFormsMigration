@@ -120,7 +120,7 @@ if (migrateOnStartup)
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
-app.MapGet("/api/orders", (bool includeDeleted, string? status, int skip, int take, AppDbContext db) =>
+app.MapGet("/api/orders", (AppDbContext db, bool includeDeleted = false, string? status = null, int skip = 0, int take = 20) =>
 {
     var query = db.Orders.Include(o => o.Items).AsNoTracking().AsQueryable();
     if (!includeDeleted)
