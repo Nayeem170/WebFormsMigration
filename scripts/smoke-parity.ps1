@@ -29,21 +29,36 @@ function Req($method, $url, $body) {
 }
 
 $home_ = GetPage '/'
-Check 'GET / returns 200' ($true)
 Check 'home shows Leo Garcia (newest seeded order)' ($home_ -match 'Leo Garcia')
 Check 'home shows Karen Novak' ($home_ -match 'Karen Novak')
 
-$products = GetPage '/Pages/Products/'
-Check 'GET /Pages/Products/ returns 200' ($true)
-Check 'products shows Wireless Headphones' ($products -match 'Wireless Headphones')
-Check 'products shows Mechanical Keyboard' ($products -match 'Mechanical Keyboard')
-Check 'products hides out-of-stock Webcam HD' ($products -notmatch 'Webcam HD')
+# The grid pages Id ASC with an active-only filter, so fixed names can drift
+# (and an absence can be paging, not filter). Re-derive the expected page 1
+# from the API with the page's own rule and require an exact match: a broken
+# filter, sort, or page size all fail this comparison.
+# Invoke-WebRequest + ConvertFrom-Json, not Invoke-RestMethod: on this
+# PowerShell (7.6.6) IRM returns a JSON top-level array as ONE nested
+# Object[] element inside @() when run from a script, which member-enumerates
+# past Where-Object filters and silently defeats Select-Object -First.
+$apiProducts = @(ConvertFrom-Json (Invoke-WebRequest "$CatalogUrl/api/products" -UseBasicParsing).Content)
+$expectedNames = @($apiProducts | Where-Object { $_.isActive -and $_.stock -gt 0 } | Sort-Object id | Select-Object -First 5 | ForEach-Object { $_.name })
+$expectedTotal = @($apiProducts | Where-Object { $_.isActive -and $_.stock -gt 0 }).Count
 
-$orders = GetPage '/Pages/Orders/'
-Check 'GET /Pages/Orders/ returns 200' ($true)
+$products = GetPage '/Pages/Products/'
+$renderedNames = @(
+    foreach ($row in [regex]::Matches($products, '(?s)<tr[^>]*>.*?</tr>')) {
+        $cells = [regex]::Matches($row.Value, '<td[^>]*>(.*?)</td>')
+        if ($cells.Count -ge 2 -and $cells[0].Groups[1].Value.Trim() -match '^\d+$') { $cells[1].Groups[1].Value.Trim() }
+    }
+)
+Check "products grid page 1 matches API-derived active-only page [$($expectedNames -join ', ')]" (($renderedNames -join '|') -eq ($expectedNames -join '|'))
+$rowCountClaim = if ($products -match '(\d+) products?\b') { [int]$Matches[1] } else { -1 }
+Check "products row count label matches active-only total (claims $rowCountClaim, expected $expectedTotal)" ($rowCountClaim -eq $expectedTotal)
+
 # Seeded names are asserted on home (bounded recent window). The orders list
 # grows with every run and paginates, so a fixed seeded name falls off it
 # eventually - assert structure here, name-presence where it cannot drift.
+$orders = GetPage '/Pages/Orders/'
 Check 'orders page renders order rows' (([regex]::Matches($orders, '<tr')).Count -gt 3)
 
 $catalogProduct = Invoke-RestMethod "$CatalogUrl/api/products/1"
