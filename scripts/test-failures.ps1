@@ -10,6 +10,7 @@ param(
 [switch]$PgMode
 )
 if ($Topology -eq 'compose') {
+    if (-not $PSBoundParameters.ContainsKey('BaseUrl')) { $BaseUrl = 'http://localhost:8080' }
     if (-not $RedisStopCommand) { $RedisStopCommand = 'docker compose stop redis' }
     if (-not $RedisStartCommand) { $RedisStartCommand = 'docker compose start redis' }
 }
@@ -89,6 +90,9 @@ function Req($method, $url, $body, $headers = $null) {
 if (-not (Wait-Healthy $CatalogUrl 5) -or -not (Wait-Healthy $OrdersUrl 5)) {
     throw 'Catalog and Orders must be running before test-failures.ps1 (Frontend too).'
 }
+if ($Topology -eq 'compose' -and -not (Wait-Healthy $BaseUrl 30)) {
+    throw 'Gateway must be running before test-failures.ps1 in compose topology.'
+}
 Get-Dashboard | Out-Null
 
 $order = @{
@@ -163,6 +167,30 @@ if ($mintedHeader) {
 }
 Check 'correlation id forwarded to Catalog log' ((Read-ServiceLog $catalogLog 'catalog') -match [regex]::Escape($corrId))
 
+if ($Topology -eq 'compose') {
+    $instances = @{}
+    foreach ($i in 1..12) {
+        $r = Get-Dashboard
+        if ($r.StatusCode -eq 200) {
+            $inst = ($r.Headers['X-Instance'] | Select-Object -First 1)
+            if ($inst) { $instances[$inst] = $true }
+        }
+    }
+    Check 'browser traffic lands on both frontend replicas' ($instances.Count -eq 2)
+
+    $gwCorr = 'gwprobe-' + [guid]::NewGuid().ToString('N')
+    $r = Invoke-WebRequest ($BaseUrl + '/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60 -Headers @{ 'X-Correlation-ID' = $gwCorr }
+    Check 'gateway passes correlation id through unchanged' (($r.Headers['X-Correlation-ID'] | Select-Object -First 1) -eq $gwCorr)
+    $r = Invoke-WebRequest ($BaseUrl + '/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60
+    $gwMinted = ($r.Headers['X-Correlation-ID'] | Select-Object -First 1)
+    Check 'gateway mints correlation id when absent' ($null -ne $gwMinted -and $gwMinted.Length -eq 32)
+
+    $feLogs = (docker compose logs --no-log-prefix frontend 2>$null | Out-String) + (docker compose logs --no-log-prefix frontend2 2>$null | Out-String)
+    Check 'frontend logs resolved endpoint pools' (($feLogs -match 'Catalog endpoint pool: \d+ endpoint') -and ($feLogs -match 'Orders endpoint pool: \d+ endpoint'))
+    $ordersLogs = docker compose logs --no-log-prefix orders 2>$null | Out-String
+    Check 'orders logs resolved catalog endpoint pool' ($ordersLogs -match 'Catalog endpoint pool: \d+ endpoint')
+}
+
 Check 'stopped Catalog' (Stop-CatalogSvc)
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $page = Get-Dashboard
@@ -191,20 +219,96 @@ Check 'Frontend recovers after Orders restart' ($page.StatusCode -eq 200 -and $p
 if ($RedisMode) {
     Invoke-Expression $RedisStopCommand | Out-Null
     Start-Sleep 3
-    $page = Get-Dashboard
-    Check 'dashboard survives Redis down (content intact)' ($page.StatusCode -eq 200 -and $page.Content -match 'Leo Garcia')
-    $products = Invoke-WebRequest ($BaseUrl + '/Pages/Products/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60
-    Check 'products page survives Redis down' ($products.StatusCode -eq 200 -and $products.Content -match 'Wireless Headphones')
-    $ordersPage = Invoke-WebRequest ($BaseUrl + '/Pages/Orders/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60
-    Check 'orders page degrades with Redis down (message, no trace)' ($ordersPage.StatusCode -eq 200 -and $ordersPage.Content -match 'Session store is unavailable right now' -and $ordersPage.Content -notmatch 'StackTrace')
-    Invoke-Expression $RedisStartCommand | Out-Null
-    $recovered = $false
-    foreach ($i in 1..20) {
-        $o = Invoke-WebRequest ($BaseUrl + '/Pages/Orders/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60
-        if ($o.Content -notmatch 'Session store is unavailable') { $recovered = $true; break }
-        Start-Sleep 1
+    if ($Topology -eq 'compose') {
+        $gateway503 = $false
+        foreach ($i in 1..15) {
+            $r = Get-Dashboard
+            if ($r.StatusCode -eq 503) { $gateway503 = $true; break }
+            Start-Sleep 2
+        }
+        Check 'gateway returns 503 while Redis down (backends report unready)' $gateway503
     }
-    Check 'orders page recovers after Redis restart' $recovered
+    else {
+        $page = Get-Dashboard
+        Check 'dashboard survives Redis down (content intact)' ($page.StatusCode -eq 200 -and $page.Content -match 'Leo Garcia')
+        $products = Invoke-WebRequest ($BaseUrl + '/Pages/Products/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60
+        Check 'products page survives Redis down' ($products.StatusCode -eq 200 -and $products.Content -match 'Wireless Headphones')
+        $ordersPage = Invoke-WebRequest ($BaseUrl + '/Pages/Orders/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60
+        Check 'orders page degrades with Redis down (message, no trace)' ($ordersPage.StatusCode -eq 200 -and $ordersPage.Content -match 'Session store is unavailable right now' -and $ordersPage.Content -notmatch 'StackTrace')
+    }
+    Invoke-Expression $RedisStartCommand | Out-Null
+    if ($Topology -eq 'compose') {
+        $recovered = $false
+        foreach ($i in 1..45) {
+            $page = Get-Dashboard
+            if ($page.StatusCode -eq 200) { $recovered = $true; break }
+            Start-Sleep 2
+        }
+        Check 'gateway serves 200 again after Redis restart' $recovered
+    }
+    else {
+        $recovered = $false
+        foreach ($i in 1..20) {
+            $o = Invoke-WebRequest ($BaseUrl + '/Pages/Orders/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60
+            if ($o.Content -notmatch 'Session store is unavailable') { $recovered = $true; break }
+            Start-Sleep 1
+        }
+        Check 'orders page recovers after Redis restart' $recovered
+    }
+}
+
+if ($Topology -eq 'compose') {
+    $hostByService = @{}
+    foreach ($svc in 'frontend', 'frontend2') {
+        $hostName = (docker compose exec -T $svc printenv HOSTNAME 2>$null | Out-String).Trim()
+        if ($hostName) { $hostByService[$svc] = $hostName }
+    }
+    if ($hostByService.Count -eq 2) {
+        $victimInstance = $hostByService['frontend2'] + ':1'
+        $survivorInstance = $hostByService['frontend'] + ':1'
+        $victimSeen = $false
+        foreach ($i in 1..8) {
+            $r = Get-Dashboard
+            if ((($r.Headers['X-Instance'] | Select-Object -First 1) -eq $victimInstance)) { $victimSeen = $true; break }
+        }
+        if ($victimSeen) {
+            docker compose stop frontend2 | Out-Null
+            Start-Sleep 10
+            $shifted = $false
+            foreach ($i in 1..30) {
+                $ok = $true
+                foreach ($j in 1..5) {
+                    $r = Get-Dashboard
+                    $servedBy = ($r.Headers['X-Instance'] | Select-Object -First 1)
+                    if ($r.StatusCode -ne 200 -or $servedBy -ne $survivorInstance) { $ok = $false; break }
+                }
+                if ($ok) { $shifted = $true; break }
+                Start-Sleep 2
+            }
+            Check 'killing one backend shifts traffic to the survivor (200s, survivor only)' $shifted
+            docker compose start frontend2 | Out-Null
+            $bothAgain = $false
+            foreach ($i in 1..45) {
+                $seen = @{}
+                foreach ($j in 1..10) {
+                    $r = Get-Dashboard
+                    if ($r.StatusCode -eq 200) {
+                        $inst = ($r.Headers['X-Instance'] | Select-Object -First 1)
+                        if ($inst) { $seen[$inst] = $true }
+                    }
+                }
+                if ($seen.Count -eq 2) { $bothAgain = $true; break }
+                Start-Sleep 2
+            }
+            Check 'restarted backend rejoins rotation' $bothAgain
+        }
+        else {
+            Check 'pre-kill positive control: gateway routes to frontend2' $false
+        }
+    }
+    else {
+        Check 'frontend hostnames resolvable via compose exec' $false
+    }
 }
 
 if ($failures -gt 0) { throw "test-failures: $failures failing checks" }
