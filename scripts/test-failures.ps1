@@ -4,7 +4,8 @@ param(
     [string]$OrdersUrl = 'http://localhost:8095',
     [switch]$RedisMode,
     [string]$RedisStopCommand = 'docker stop ccw-redis',
-    [string]$RedisStartCommand = 'docker start ccw-redis'
+    [string]$RedisStartCommand = 'docker start ccw-redis',
+    [switch]$PgMode
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,12 +42,16 @@ function Stop-ServicePort([int]$port) {
 }
 
 function Start-Catalog() {
-    Start-Process -FilePath 'dotnet' -ArgumentList (Join-Path $root 'Microservices\Catalog\bin\Debug\net9.0\Catalog.dll') -WorkingDirectory (Join-Path $root 'Microservices\Catalog') -WindowStyle Hidden
+    $p = @{ FilePath = 'dotnet'; ArgumentList = (Join-Path $root 'Microservices\Catalog\bin\Debug\net9.0\Catalog.dll'); WorkingDirectory = (Join-Path $root 'Microservices\Catalog'); WindowStyle = 'Hidden' }
+    if ($PgMode) { $p.Environment = @{ Database__Provider = 'postgres'; Database__ConnectionString = 'Host=127.0.0.1;Port=15432;Database=ccw_catalog;Username=ccw_app;Password=localdev'; Database__Migrate = 'false' } }
+    Start-Process @p
     Wait-Healthy $CatalogUrl 60 | Out-Null
 }
 
 function Start-Orders() {
-    Start-Process -FilePath 'dotnet' -ArgumentList (Join-Path $root 'Microservices\Orders\bin\Debug\net9.0\Orders.dll') -WorkingDirectory (Join-Path $root 'Microservices\Orders') -WindowStyle Hidden
+    $p = @{ FilePath = 'dotnet'; ArgumentList = (Join-Path $root 'Microservices\Orders\bin\Debug\net9.0\Orders.dll'); WorkingDirectory = (Join-Path $root 'Microservices\Orders'); WindowStyle = 'Hidden' }
+    if ($PgMode) { $p.Environment = @{ Database__Provider = 'postgres'; Database__ConnectionString = 'Host=127.0.0.1;Port=15432;Database=ccw_orders;Username=ccw_app;Password=localdev'; Database__Migrate = 'false' } }
+    Start-Process @p
     Wait-Healthy $OrdersUrl 60 | Out-Null
 }
 

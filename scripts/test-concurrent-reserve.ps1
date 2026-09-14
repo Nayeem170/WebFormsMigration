@@ -18,7 +18,7 @@ foreach ($n in $Ns) {
     $suffix = [guid]::NewGuid().ToString('N').Substring(0, 8)
     $name = "sweep-$n-$suffix"
     $created = Req Post "$CatalogUrl/api/products" @{ name = $name; category = 'Sweep'; price = 1; stock = $n; isActive = $true }
-    if ($created.StatusCode -ne 201) { throw "product create failed: $($created.StatusCode)" }
+    if ($created.StatusCode -ne 201) { throw "product create failed: $($created.StatusCode) body=[$($created.Content)]" }
     $id = $created.Content.Trim('"')
     $runId = [guid]::NewGuid().ToString('N')
 
