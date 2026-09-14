@@ -5,3 +5,9 @@ services:
   orders:
     ports:
       - "127.0.0.1:18095:8095"
+  catalog2:
+    ports:
+      - "127.0.0.1:18096:8094"
+  orders2:
+    ports:
+      - "127.0.0.1:18097:8095"
