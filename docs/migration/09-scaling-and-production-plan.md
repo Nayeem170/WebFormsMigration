@@ -686,14 +686,124 @@ Steps:
    name per backend - a static endpoint list goes stale against pod IPs that
    churn on every scale event, so the platform takes over and the
    multi-endpoint code is retired rather than carried forward.
-4. Correlation IDs pass through the gateway unchanged (it logs them too).
+4. Correlation IDs pass through the gateway unchanged, and the gateway mints
+   one when the inbound request has none - the gateway's access log then
+   always shares an ID with everything downstream (Phase 8's requirement).
+   Host and scheme pass through untouched for now: WebForms builds postback
+   targets and redirects from them, and the stack is plain HTTP until
+   Phase 7.
 
 Exit criteria: browser traffic lands on both frontend replicas in a
 two-instance test; killing one backend shifts traffic with no user-visible
 failure; failure suite green through the gateway port.
 
+Standing verification rule for every remaining phase (introduced here after
+the Phase 3 Orders BaseUrl find): a negative check that passes because the
+mechanism under test was never wired is indistinguishable from a real pass.
+Every exit criterion gets a positive control - per-instance evidence
+(`X-Instance` response headers, instance-tagged logs) proving traffic
+reached the specific instance/endpoint in question, before the negative
+behavior is asserted. "Requests succeed" is not evidence of balancing;
+"both instance ids observed" is.
+
 Rollback: point the browser and `BaseUrl` configs back at direct ports; the
 gateway is stateless and removable.
+
+Phase 4 execution record (2026-09-14):
+
+- Gateway: `Microservices/Gateway`, a minimal YARP app (config-as-code from
+  appsettings, no custom policies). One cluster "frontend" with two explicit
+  destinations (http://frontend:8081, http://frontend2:8081), RoundRobin
+  balancing, active health checks every 2s against `/health/ready`
+  (ConsecutiveFailures policy), passive health enabled. Compose runs
+  `frontend` + `frontend2` as explicit services (not `deploy.replicas`) so
+  YARP has stable per-instance DNS names - a replica-set's single service
+  name gives YARP one logical destination and no per-instance skipping.
+  The gateway is the only published application port (127.0.0.1:8080);
+  frontend lost its host publish and moved into check-exposure's
+  zero-published list alongside catalog/orders.
+- The YARP lesson that cost the most debugging: marking destinations
+  Unhealthy does NOT stop routing by default. YARP's default
+  AvailableDestinationsPolicy is `HealthyOrPanic` - when every destination
+  is unhealthy it "panics" and routes to all of them rather than returning
+  503. Observed exactly that: both backends actively marked Unhealthy,
+  gateway still serving 200s. The fix is the explicit cluster policy
+  `AvailableDestinationsPolicy: HealthyAndUnknown` (confirmed against YARP
+  source: ClusterDestinationsUpdater defaults to HealthyOrPanic; there is
+  no "ReadyAndUnknown" - that name silently resolves to nothing). With the
+  strict policy: all backends unready -> empty destination set -> typed 503
+  at the edge. Also from source: ConsecutiveFailures' threshold is not an
+  Active config key (a stray `FailureThreshold` in appsettings is silently
+  ignored); it comes from the policy options default, overridable per
+  cluster via metadata.
+- `/health/ready` split per the review: the warm-up latch stays as a
+  precondition AND a live dependency check runs - a Redis PING on the
+  registered multiplexer (500ms budget, `GetDatabase().PingAsync()`);
+  memory-session mode (local topology) skips the ping. Ready now means
+  "warmed AND currently able to serve session traffic", which is what a
+  routing decision needs. First implementation bug found by the suite: the
+  multiplexer was registered via `AddSingleton(multiplexer)` which binds
+  the CONCRETE type - `GetService<IConnectionMultiplexer>()` returned null
+  and the ping was silently skipped (ready stayed 200 with Redis down).
+  Registered as the interface; re-verified 503.
+- Consequence for the failure suite, recorded deliberately: with Redis
+  down, BOTH frontends report unready, the gateway excludes everything and
+  returns 503 - the page-level degrade UX ("Session store is unavailable
+  right now") is now unreachable through the gateway. The suite keeps the
+  page-degrade assertions in local topology (no gateway, direct frontend)
+  and asserts the typed 503 + recovery in compose topology. Both behaviors
+  are still tested; which one a user sees depends on whether a gateway is
+  in the path.
+- Correlation at the edge: the gateway reuses an inbound X-Correlation-ID
+  or mints one, echoes it, and sets it on the request BEFORE proxying so
+  downstream sees the same id. Gateway-local response headers go through
+  `Response.OnStarting` with ContainsKey guards - setting them pre-proxy
+  duplicated values once YARP copied the backend's headers (both sides
+  wrote the header).
+- Instance identity: all three services + the gateway emit `X-Instance`
+  (machine:pid) / `X-Gateway-Instance` response headers. This is the
+  positive-control substrate: the suite proves round-robin by collecting
+  the header over 12 gateway requests and asserting 2 distinct values, and
+  proves the kill test by asserting pre-kill traffic included the victim,
+  post-kill traffic hit ONLY the survivor, and the restarted victim
+  rejoins. All three held.
+- Multi-endpoint BaseUrl per plan step 3: `ServiceEndpointPool` in
+  Contracts (comma-separated list, round-robin, endpoint benched after 2
+  consecutive transport failures, re-admitted after 30s; HTTP-status
+  failures do NOT bench an endpoint - transport vs application failure
+  distinguished, matching the existing retry semantics). Frontend's
+  ServiceHttp/HttpProductService/HttpOrderService and Orders' CatalogClient
+  select an endpoint per ATTEMPT so retries naturally fail over. Each pool
+  logs its resolved endpoint count at startup ("Catalog endpoint pool:
+  N endpoint(s): ...") and the suite asserts the lines exist in both
+  frontend replicas' and orders' logs - a missed override shows as
+  "pool of one" in logs rather than a silent no-balance. Frontend's pool
+  log lines initially vanished: AppData.Initialize ran before the Trace
+  listeners were attached; listener setup now precedes client
+  construction. Compose Phase 4 shape is deliberately 1 catalog + 1 orders
+  endpoint (2x everything is Phase 5); the pool logs show 1 endpoint(s)
+  until then.
+- Frontend's docker logs now carry the Trace output (ConsoleTraceListener
+  landed in Phase 3); with the ordering fix, instance-level facts are
+  greppable per replica - the substrate Phase 8 formalizes.
+- Compose quirks recorded: YAML merge anchors (frontend2 = <<: *frontend)
+  work, but each service still builds its own image tag
+  (corewebforms-frontend2) - rebuilding "frontend" does NOT refresh
+  frontend2; build both. And any `docker compose up` without the same -f
+  override files as the original up silently recreates services under the
+  base config (dropping test ports) - always pass both files.
+- Verification: failure suite 28 checks green through the gateway port in
+  compose topology with Redis mode (including both-replicas, pass-through,
+  mint, pool-log, Redis-503, and the kill/rejoin sequence); smoke parity
+  green through the gateway (place 201, stock 38->35->38, delete 204);
+  11/11 characterization facts against the compose services; exposure
+  check green on the default shape (frontend + frontend2 now zero-published,
+  gateway 8080 loopback); local rollback proof - bare sqlite stack, suite
+  all checks passed, 11/11 facts, same binaries (pool code active with a
+  single-endpoint pool).
+- Standing state: compose stack on the default shape, all healthy, gateway
+  on 127.0.0.1:8080. Artifacts: `artifacts/phase4/failures-compose.txt`,
+  `artifacts/phase4/failures-local.txt`.
 
 ### Phase 5 - Scale-out proof: N replicas
 
@@ -785,6 +895,10 @@ Steps:
    stay public if the product wants a public catalog - decide and record.
 3. TLS termination at the gateway; internal traffic can stay plain HTTP on
    an isolated network, or use mTLS if the platform makes it cheap.
+   ForwardedHeaders middleware becomes MANDATORY here (the gateway must
+   forward X-Forwarded-For/Proto/Host and Frontend must honor them): the
+   Phase 4 gateway deliberately passes Host and scheme through untouched,
+   which is correct only while everything is plain HTTP end to end.
 4. Rate limiting: ASP.NET Core rate-limiter middleware at the gateway
    (per-IP and global limits informed by Phase 0 numbers), applied before
    auth-adjacent endpoints.
