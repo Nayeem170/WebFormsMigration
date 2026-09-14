@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <EnableRuntimeAspxCompilation>true</EnableRuntimeAspxCompilation>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <RootNamespace>CoreWebForms</RootNamespace>
     <AssemblyName>CoreWebForms</AssemblyName>

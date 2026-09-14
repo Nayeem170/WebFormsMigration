@@ -14,8 +14,13 @@ var urls = builder.Configuration["Urls"] ?? "http://localhost:8094";
 builder.WebHost.UseUrls(urls);
 
 var logPath = Path.Combine(builder.Environment.ContentRootPath, "App_Data", "logs", "app.log");
-Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
-builder.Logging.AddProvider(new FileLoggerProvider(logPath));
+try
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+    builder.Logging.AddProvider(new FileLoggerProvider(logPath));
+}
+catch (IOException) { }
+catch (UnauthorizedAccessException) { }
 
 var dbPathSetting = builder.Configuration["Database:Path"];
 var dbPath = !string.IsNullOrEmpty(dbPathSetting)

@@ -39,8 +39,13 @@ var runAsMigrator = args.Contains("--migrate");
 var migrateOnStartup = runAsMigrator || builder.Configuration.GetValue<bool?>("Database:Migrate") == true;
 
 var logPath = Path.Combine(builder.Environment.ContentRootPath, "App_Data", "logs", "app.log");
-Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
-builder.Logging.AddProvider(new FileLoggerProvider(logPath));
+try
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+    builder.Logging.AddProvider(new FileLoggerProvider(logPath));
+}
+catch (IOException) { }
+catch (UnauthorizedAccessException) { }
 
 var app = builder.Build();
 

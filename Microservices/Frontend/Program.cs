@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Web.Routing;
+using Inventory.Contracts;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
@@ -62,6 +63,17 @@ namespace CoreWebForms
 
             var app = builder.Build();
 
+            app.Use(async (context, next) =>
+            {
+                var incoming = context.Request.Headers[CorrelationHeader.Name].ToString();
+                var correlationId = string.IsNullOrWhiteSpace(incoming)
+                    ? Guid.NewGuid().ToString("N")
+                    : incoming;
+                context.Items["CorrelationId"] = correlationId;
+                context.Response.Headers[CorrelationHeader.Name] = correlationId;
+                await next(context);
+            });
+
             if (string.IsNullOrEmpty(sessionRedis) && !builder.Configuration.GetValue<bool>("Session:UseMemoryCache"))
             {
                 app.Logger.LogError("Session state is running on the in-process memory cache: single-instance only. Set Session:Redis for multi-instance deployments, or Session:UseMemoryCache to acknowledge single-instance operation.");
@@ -88,17 +100,26 @@ namespace CoreWebForms
             var runMigrations = builder.Configuration.GetValue<bool?>("Database:Migrate") ?? true;
             AppData.Initialize(dbPath, productsMode, productsBaseUrl, runMigrations, ordersMode, ordersBaseUrl);
 
-            var logDir = Path.Combine(contentRoot, "App_Data", "logs");
-            Directory.CreateDirectory(logDir);
-            var logPath = Path.Combine(logDir, "app.log");
-            if (Trace.Listeners["file"] == null)
+            if (Trace.Listeners["console"] == null)
             {
-                var listener = new TextWriterTraceListener(logPath, "file")
-                {
-                    TraceOutputOptions = TraceOptions.DateTime
-                };
-                Trace.Listeners.Add(listener);
+                Trace.Listeners.Add(new ConsoleTraceListener { Name = "console" });
             }
+            try
+            {
+                var logDir = Path.Combine(contentRoot, "App_Data", "logs");
+                Directory.CreateDirectory(logDir);
+                var logPath = Path.Combine(logDir, "app.log");
+                if (Trace.Listeners["file"] == null)
+                {
+                    var listener = new TextWriterTraceListener(logPath, "file")
+                    {
+                        TraceOutputOptions = TraceOptions.DateTime
+                    };
+                    Trace.Listeners.Add(listener);
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
             Trace.AutoFlush = true;
 
             app.MapGet("/favicon.ico", () => Results.File(
@@ -136,7 +157,7 @@ namespace CoreWebForms
                     RouteTable.Routes.MapPageRoute("Products", "Pages/Products/", "~/Pages/Products/Products.aspx");
                     RouteTable.Routes.MapPageRoute("Orders", "Pages/Orders/", "~/Pages/Orders/Orders.aspx");
 
-                    if (app.Environment.IsDevelopment())
+                    if (builder.Configuration.GetValue<bool>("LaunchBrowser"))
                         Process.Start(new ProcessStartInfo(urls.Split(';')[0]) { UseShellExecute = true });
                 });
 
