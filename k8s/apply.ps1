@@ -83,8 +83,24 @@ kubectl -n corewebforms delete configmap postgres-init --ignore-not-found | Out-
 kubectl -n corewebforms create configmap postgres-init --from-file=infra/postgres-init.sql | Out-Null
 
 kubectl apply -f k8s/ | Out-Null
-kubectl -n corewebforms wait --for=condition=ready pod -l app=catalog --timeout=300s
-kubectl -n corewebforms wait --for=condition=ready pod -l app=orders --timeout=300s
-kubectl -n corewebforms wait --for=condition=ready pod -l app=frontend --timeout=300s
-kubectl -n corewebforms wait --for=condition=ready pod -l app=gateway --timeout=300s
+# Fail closed: kubectl wait timing out is NOT a pwsh error (native exit
+# code), so an unchecked wait once let the script finish green with the
+# gateway pod Pending. Check the exit code and dump the evidence a
+# Pending/unschedulable pod needs to be diagnosed from a CI log.
+function Wait-Ready([string]$app) {
+    kubectl -n corewebforms wait --for=condition=ready pod -l app=$app --timeout=300s
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "--- describe $app pods ---"
+        kubectl -n corewebforms describe pod -l app=$app
+        Write-Host "--- nodes ---"
+        kubectl get nodes -o wide
+        Write-Host "--- recent events ---"
+        kubectl -n corewebforms get events --sort-by=.lastTimestamp
+        throw "pods for $app did not become Ready"
+    }
+}
+Wait-Ready catalog
+Wait-Ready orders
+Wait-Ready frontend
+Wait-Ready gateway
 kubectl -n corewebforms get pods -o wide
