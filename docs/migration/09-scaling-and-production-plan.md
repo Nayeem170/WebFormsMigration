@@ -1011,9 +1011,179 @@ Steps:
 6. ConfigMaps and Secrets replace env-file values; the secrets policy from
    the repo's shared conventions applies (nothing in git).
 
+Phase 6 decisions (recorded before any manifest is written, per review):
+
+- Connection-budget arithmetic FIRST. From the Phase 5 numbers:
+  MaxPoolSize=20 per pod, Postgres max_connections=100, 20 held back for
+  migrators/admin -> 80 budget, and (catalog R + orders R) x 20 <= 80
+  gives R <= 2 - the HPA ceiling would equal today's static count and
+  scaling would be arithmetically impossible. The structural problem:
+  pool size is deploy-time, replica count is runtime, and nothing shrinks
+  pools as pods multiply; every scale-up is a connection-budget event with
+  no feedback path. DECISION: raise Postgres max_connections to 200 in
+  BOTH compose and k8s (parity - one number, both topologies), keep
+  MaxPoolSize=20. Budget 200 - 20 = 180 -> Rc + Ro <= 9 -> HPA max 4+4 =
+  160 <= 180 with 20 spare. Why this lever: Phase 5's real finding was
+  that the pool cap is admission control - it bounds concurrent
+  transactions queuing on a row. Lowering MaxPoolSize to buy replicas
+  re-derives that control at every HPA change and invalidates every Phase
+  5 measurement; raising max_connections changes no per-pod behavior, so
+  all Phase 5 baselines stay valid, and the wall moves to a documented
+  place. PgBouncer is the only option where HPA max comes purely from
+  load tests (pools decoupled from server connections), but it must also
+  enter compose for parity and adds a new failure class; recorded as the
+  designated next step if scaling past 4+4. HPA max 4 is load-justified,
+  not optimistic: 2x ran the 256-rung sweep clean (4033 ms) and held
+  408 rps on dashboard@50 - 4 is drain and burst headroom. min 2 each for
+  frontend/catalog/orders (cold start, write availability), gateway
+  static.
+- Shutdown arithmetic (step 5, measured from code, not guessed):
+  CatalogClient is 3 attempts x 3 s timeout + 200 ms backoff = 9.4 s per
+  stock call. Worst in-flight place-order: reserve (9.4 s) + insert
+  (< 0.5 s) + compensation release on insert failure (9.4 s) ~= 19.5 s -
+  comfortably past the ASP.NET Core default ShutdownTimeout of 5 s,
+  which would cut the process mid-compensation: stock reserved, order
+  never inserted, release never sent. DECISION: HostOptions.ShutdownTimeout
+  = 25 s in every service; terminationGracePeriodSeconds = 35 (the pod
+  grace is useless if the app already gave up first).
+- Probe split (step 1). Liveness gets /health/live and NOTHING else:
+  /health/ready PINGs Redis, and wiring that to liveness turns a Redis
+  blip into every Frontend pod failing its probe simultaneously -
+  dependency degradation amplified into a restart storm and total outage.
+  Catalog and Orders currently expose a single unconditional /health
+  with no DB check: liveness-only would leave readiness blind to
+  database loss. DECISION: add the same split there - /health/live
+  (unconditional) + /health/ready (DB ping). Readiness SHOULD see DB
+  loss (the Service pulls the pod); liveness must not.
+  Startup probe on Frontend sized off Phase 3's measured ~23 s cold ASPX
+  compile with margin for CPU-limit stretch: period 5 s x
+  failureThreshold 30 = 150 s ceiling. An undersized startup probe
+  produces CrashLoopBackOff that reads like an application fault.
+- Migrations (step 3): Kubernetes has no service_completed_successfully.
+  DECISION: run the migrator entrypoint (same image, --migrate) as an
+  initContainer in each Deployment - the Phase 2 advisory lock
+  serializes concurrent runners, the pod cannot go Ready before its own
+  migration check completes, and gating is structural rather than
+  orchestration-dependent. Divergence from compose (one-shot services)
+  is deliberate and documented here.
+- Pool retirement and pod pinning (step 2): k8s Service DNS replaces the
+  multi-endpoint pools (single BaseUrl per service). But ClusterIP
+  balances per connection and both ServiceHttp and CatalogClient set
+  PooledConnectionLifetime = 2 min with keep-alives - Frontend pins to
+  whichever Catalog pod it first connected to for two minutes at a
+  stretch, new HPA pods receive no traffic until connections cycle, CPU
+  stays high on the originals, and the HPA scales again: a feedback loop
+  that looks like working autoscaling with lumpy distribution. DECISION:
+  make PooledConnectionLifetime configurable
+  (Http__PooledConnectionLifetimeSeconds, default 120 to preserve
+  compose behavior) and set 20 s in the k8s ConfigMap. The retirement
+  gets the standing rule applied to it: X-Instance diversity asserted on
+  the Frontend->Catalog hop SPECIFICALLY (catalog pod logs across a
+  dashboard burst must show >= 2 pods serving), not just at the gateway -
+  the gateway will look fine while the internal hop is pinned.
+- Exposure: ClusterIP-only Services (no NodePort, no LoadBalancer) until
+  Phase 7; access is kubectl port-forward, which binds loopback by
+  default. A k8s exposure check asserts this.
+
 Exit criteria: a load ramp grows replicas and a load drop shrinks them, on
 the local cluster, with all suites green at both ends; a scale-down during
 place-order traffic produces no lost or double-charged stock.
+
+Phase 6 HPA prediction (written before the run, per the standing rule):
+mixed load = orders-write 16 VUs (via orders Service, exercising the
+reserve path on both orders and catalog) + dashboard 8 VUs (via gateway).
+CPU requests are 500m for catalog/orders, 250m for frontend, HPA target
+60%. Expectation: catalog/orders cross 60% within ~30-60s of load start
+and scale 2->3 (4 only if per-pod CPU saturates); frontend's rendered
+dashboard is cheap post-compile so it may stay at 2. Scale-up pods Ready
+within ~15s of the HPA decision and MUST serve traffic (per-pod log
+evidence, the pinning guard). After load stops: 60s stabilization + 1
+pod/30s policy -> back to 2 within ~3-4 min. Risk to watch: k6 write
+load through one port-forward is itself a bottleneck - if measured rps
+looks port-forward-bound, the HPA may see too little CPU to trip.
+
+Phase 6 execution record (2026-09-15):
+
+- Platform: kind v0.33.0 (winget has no kind package; binary fetched to
+  the user tools dir), single control-plane node, metrics-server applied
+  with --kubelet-insecure-tls (kind's kubelet certs are unsigned).
+  k8s/apply.ps1 builds the four images, creates the cluster, kind-loads
+  images, creates the postgres Secret by PARSING POSTGRES_PASSWORD out of
+  compose.yaml at runtime (same source compose uses; no new literals in
+  git), then applies manifests and waits Ready. First run failed on
+  ordering: secrets created before the namespace existed - fixed by
+  applying 00-namespace.yaml first. Frontend pods restart ~2x at first
+  bring-up (Session Redis AbortOnConnectFail crashes before redis is
+  Ready); kubelet's restart loop handles it, recorded as expected.
+- Probes (decision block, implemented): liveness = /health/live
+  everywhere; Catalog/Orders gained the split (/health/live +
+  /health/ready with a DB check); frontend startupProbe 5s x 30 = 150s
+  over the measured ~23s cold compile. One real lesson mid-phase:
+  readiness first used EF CanConnectAsync, which BORROWS A WARM POOLED
+  CONNECTION and validates nothing on the wire - with postgres gone, one
+  pod flipped NotReady in ~15s (no pool) while the other stayed Ready
+  for ~3 minutes (blackholed TCP looks alive until bytes move).
+  /health/ready now runs SELECT 1 so bytes hit the socket; DB loss flips
+  every pod within one probe threshold. Structural test in the battery:
+  scale postgres to 0 -> catalog ready-addresses shrink to none, zero
+  restarts (liveness quiet), recovery gated on having OBSERVED emptiness.
+- Two vacuous-pass traps caught in my own k8s checks, same class as the
+  Phase 5 ($true) sweep: (1) endpoints emptiness tested via
+  '{.subsets}', which keeps printing notReadyAddresses forever - the
+  check was unfalsifiable; now queries .subsets[0].addresses. (2) The
+  recovery check passed while the loss check failed because endpoints
+  never emptied; now gated. PowerShell also bit twice in psql asserts:
+  \" is not an escape in PS strings (the SQL arrived as several mangled
+  arguments, psql's error went to 2>$null, and empty output cast to 0
+  made two checks pass vacuously), and ConvertTo-Json's default depth 2
+  silently mangles nested items arrays. Both fixed with -f formatted
+  single-quoted SQL and -Depth 5.
+- Pool retirement (decision block, implemented): single Service DNS
+  BaseUrls; per-pod pool count asserted = 1 via each pod's OWN logs
+  (frontend writes pool lines to its file logger - read inside the pod
+  with grep; orders logs console). Http__PooledConnectionLifetimeSeconds
+  defaults 120 (compose unchanged) and the k8s ConfigMap sets 20.
+  Frontend->Catalog diversity asserted from POD LOGS over a 60s marked
+  burst: 2 of 2 catalog pods served; correlation id from a gateway page
+  GET reaches catalog pod logs.
+- Drain criterion (k8s/scale-drain-test.ps1): 60 sequential place-orders
+  through the orders Service with a catalog pod DELETED at iteration 20
+  (SIGTERM drain, ShutdownTimeout 25s, grace 35s overlapping in-flight
+  reserves). Result: 60/60 x 201, DB-asserted (psql, immune to
+  port-forward churn): 60 order rows, 60 charged items, stock 60 -> 0
+  exactly (no lost charge, no double charge), no unexpected statuses,
+  orders pods never restarted. Assertions query "Products"/"Orders"/
+  "OrderItems" with quoted PascalCase identifiers (EF naming).
+- HPA (k8s/hpa-demo.ps1): ramp = orders-write 16 VUs via orders Service
+  + dashboard 8 VUs via gateway, 150s. orders 2 -> 4, frontend 2 -> 4,
+  catalog stayed 2; all four new pods shown to have SERVED traffic by
+  per-pod logs (new orders pods: 4144 and 5189 requests - the 20s pooled
+  lifetime distributing load, the pinning guard earning its keep).
+  Scale-down: 60s stabilization + 1 pod/30s -> all back at 2; smoke
+  green at the end state. Prediction outcome, honestly: right that
+  orders would scale (but to 4, not the predicted 3); WRONG that
+  catalog's reserve path would trip CPU (reserve SQL is cheap - the
+  write bottleneck is the orders-side insert/EF/JSON pipeline); WRONG
+  that frontend might stay at 2 (dashboard render with session state
+  costs more than predicted). The port-forward-bottleneck risk did not
+  materialize.
+- Parity after the connection-budget change: compose stack rebuilt with
+  the same images, postgres recreated with max_connections=200 - full
+  suite 39/39 with -RedisMode -PgMode, exposure all-pass on the default
+  shape, local bare suite 19/19. The decision block's claim that raising
+  max_connections invalidates no Phase 5 baseline is now tested, not
+  just asserted.
+- kubectl port-forward pins ONE backing pod: any churn of that pod
+  silently kills the stream (it fails on next use). The drain test
+  self-heals its forwards; and the k8s forwards collide with the compose
+  overlay ports 18094/18095 - both stacks cannot use those local ports
+  simultaneously. Killing a stray forward by port owner killed
+  com.docker.backend once and took Docker Desktop (and the kind node)
+  down; everything recovered on restart - kind containers auto-restart
+  and the cluster came back with all pods Ready.
+- Standing state: compose default shape 9 healthy + exposure all-pass;
+  kind cluster up (9 pods at min replicas, HPA metrics live, ClusterIP
+  only per k8s/check-exposure.ps1). Artifacts: artifacts/phase6/.
 
 Rollback: fixed replica counts with the HPA removed; the cluster itself is
 disposable locally. Production target choice (managed K8s, App Service with
