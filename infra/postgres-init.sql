@@ -8,7 +8,12 @@ CREATE ROLE ccw_migrator LOGIN PASSWORD 'localdev';
 CREATE DATABASE ccw_orders;
 
 GRANT CONNECT ON DATABASE ccw_catalog TO ccw_app, ccw_migrator;
-GRANT USAGE, CREATE ON SCHEMA public TO ccw_app, ccw_migrator;
+-- ccw_app is DML-only: USAGE, never CREATE. A compromised app credential
+-- must not be able to stage tables/functions outside the migration
+-- history (Phase 2 step 4: service roles held to DML-on-their-schema).
+-- test-auth.ps1 asserts the split from both sides.
+GRANT USAGE ON SCHEMA public TO ccw_app;
+GRANT USAGE, CREATE ON SCHEMA public TO ccw_migrator;
 ALTER DEFAULT PRIVILEGES FOR ROLE ccw_migrator IN SCHEMA public
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ccw_app;
 ALTER DEFAULT PRIVILEGES FOR ROLE ccw_migrator IN SCHEMA public
@@ -16,7 +21,8 @@ ALTER DEFAULT PRIVILEGES FOR ROLE ccw_migrator IN SCHEMA public
 
 \connect ccw_orders
 GRANT CONNECT ON DATABASE ccw_orders TO ccw_app, ccw_migrator;
-GRANT USAGE, CREATE ON SCHEMA public TO ccw_app, ccw_migrator;
+GRANT USAGE ON SCHEMA public TO ccw_app;
+GRANT USAGE, CREATE ON SCHEMA public TO ccw_migrator;
 ALTER DEFAULT PRIVILEGES FOR ROLE ccw_migrator IN SCHEMA public
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ccw_app;
 ALTER DEFAULT PRIVILEGES FOR ROLE ccw_migrator IN SCHEMA public
