@@ -5,7 +5,7 @@
 #     the gateway will look fine while the internal hop is pinned
 #   - correlation id reaches catalog pod logs from a gateway page GET
 param(
-    [string]$GatewayUrl = 'http://localhost:18080'
+    [string]$GatewayUrl = 'http://127.0.0.1:18080'
 )
 $ErrorActionPreference = 'Stop'
 $failures = 0
@@ -61,16 +61,20 @@ Check 'frontend pods log Orders pool with 1 endpoint each' (Test-K8sPool fronten
 Check 'orders pods log Catalog pool with 1 endpoint each' (Test-K8sPool orders 'Catalog')
 
 # --- health split ---------------------------------------------------------
-$live = Invoke-WebRequest "$GatewayUrl/health/live" -UseBasicParsing -TimeoutSec 10
-Check 'gateway /health/live answers 200' ($live.StatusCode -eq 200)
-$feReady = Invoke-WebRequest "$GatewayUrl/health/ready" -UseBasicParsing -TimeoutSec 10
-Check 'frontend /health/ready answers 200 through gateway' ($feReady.StatusCode -eq 200)
+# Phase 7: /health* is unroutable from the public port (recon oracle) -
+# the gateway must 404 it there and serve it on the management port.
+$live = Invoke-WebRequest "$GatewayUrl/health/live" -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 10
+Check 'gateway public port refuses /health/live (404)' ($live.StatusCode -eq 404)
+$mgmt = kubectl -n corewebforms exec deployment/gateway -- curl -sf http://localhost:8090/health/live 2>$null
+Check 'gateway management port serves /health/live' ($LASTEXITCODE -eq 0 -and "$mgmt" -match 'alive')
+$feReady = Invoke-WebRequest "$GatewayUrl/" -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 10
+Check 'frontend answers through gateway' ($feReady.StatusCode -eq 200)
 
-$catLive = kubectl -n corewebforms exec deploy/catalog -- curl -sf http://localhost:8094/health/live 2>$null
+$catLive = kubectl -n corewebforms exec deploy/catalog -- curl -sf http://127.0.0.1:8094/health/live 2>$null
 Check 'catalog pod /health/live answers ok' ($LASTEXITCODE -eq 0 -and "$catLive" -match 'alive')
-$ordLive = kubectl -n corewebforms exec deploy/orders -- curl -sf http://localhost:8095/health/live 2>$null
+$ordLive = kubectl -n corewebforms exec deploy/orders -- curl -sf http://127.0.0.1:8095/health/live 2>$null
 Check 'orders pod /health/live answers ok' ($LASTEXITCODE -eq 0 -and "$ordLive" -match 'alive')
-$catReady = kubectl -n corewebforms exec deploy/catalog -- curl -sf http://localhost:8094/health/ready 2>$null
+$catReady = kubectl -n corewebforms exec deploy/catalog -- curl -sf http://127.0.0.1:8094/health/ready 2>$null
 Check 'catalog pod /health/ready answers ready' ($LASTEXITCODE -eq 0 -and "$catReady" -match 'ready')
 
 # Readiness must SEE database loss: scale postgres to 0, catalog readiness
@@ -106,7 +110,10 @@ Check 'catalog readiness recovers when DB returns' ($notReady -and $recovered)
 # require >= 2 distinct catalog pods having served /api/products during the
 # burst. The burst is tagged with a correlation marker so only burst lines
 # count.
-$marker = 'diversity-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+# 32-hex markers: the gateway validates correlation ids (32 hex) and
+# replaces non-conforming ones (Phase 7), so markers must pass validation
+# to be traceable through to the catalog pods.
+$marker = [guid]::NewGuid().ToString('N')
 $catalogPodsBefore = @(kubectl -n corewebforms get pods -l app=catalog -o name)
 $burstEnd = (Get-Date).AddSeconds(60)
 $burstOk = $true
@@ -127,7 +134,7 @@ Check "Frontend->Catalog diversity: >= 2 catalog pods served the burst ($($servi
 # --- correlation id reaches catalog pod logs ------------------------------
 # One gateway page GET with a fresh correlation id; it must appear in at
 # least one catalog pod's logs (kubectl logs aggregation across pods).
-$corr = 'k8s-corr-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+$corr = [guid]::NewGuid().ToString('N')
 Invoke-WebRequest "$GatewayUrl/" -UseBasicParsing -TimeoutSec 10 -Headers @{ 'X-Correlation-ID' = $corr } | Out-Null
 Start-Sleep -Seconds 2
 $corrHit = $false

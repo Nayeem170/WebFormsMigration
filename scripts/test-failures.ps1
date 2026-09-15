@@ -1,7 +1,7 @@
 param(
-[string]$BaseUrl = 'http://localhost:8081',
-[string]$CatalogUrl = 'http://localhost:8094',
-[string]$OrdersUrl = 'http://localhost:8095',
+[string]$BaseUrl = 'http://127.0.0.1:8081',
+[string]$CatalogUrl = 'http://127.0.0.1:8094',
+[string]$OrdersUrl = 'http://127.0.0.1:8095',
 [string]$CatalogUrl2 = '',
 [string]$OrdersUrl2 = '',
 [switch]$RedisMode,
@@ -12,13 +12,13 @@ param(
 [switch]$PgMode
 )
 if ($Topology -eq 'compose') {
-    if (-not $PSBoundParameters.ContainsKey('BaseUrl')) { $BaseUrl = 'http://localhost:8080' }
+    if (-not $PSBoundParameters.ContainsKey('BaseUrl')) { $BaseUrl = 'http://127.0.0.1:8080' }
     # Direct service ports only exist under the test-ports overlay
     # (compose.yaml + compose.test-ports.yaml); the documented suite-run shape.
-    if (-not $PSBoundParameters.ContainsKey('CatalogUrl')) { $CatalogUrl = 'http://localhost:18094' }
-    if (-not $PSBoundParameters.ContainsKey('OrdersUrl')) { $OrdersUrl = 'http://localhost:18095' }
-    if (-not $CatalogUrl2) { $CatalogUrl2 = 'http://localhost:18096' }
-    if (-not $OrdersUrl2) { $OrdersUrl2 = 'http://localhost:18097' }
+    if (-not $PSBoundParameters.ContainsKey('CatalogUrl')) { $CatalogUrl = 'http://127.0.0.1:18094' }
+    if (-not $PSBoundParameters.ContainsKey('OrdersUrl')) { $OrdersUrl = 'http://127.0.0.1:18095' }
+    if (-not $CatalogUrl2) { $CatalogUrl2 = 'http://127.0.0.1:18096' }
+    if (-not $OrdersUrl2) { $OrdersUrl2 = 'http://127.0.0.1:18097' }
     if (-not $RedisStopCommand) { $RedisStopCommand = 'docker compose stop redis' }
     if (-not $RedisStartCommand) { $RedisStartCommand = 'docker compose start redis' }
 }
@@ -127,7 +127,14 @@ if ($Topology -eq 'compose') {
     if (-not (Wait-Healthy $CatalogUrl2 15) -or -not (Wait-Healthy $OrdersUrl2 15)) {
         throw 'Second Catalog/Orders replicas must be running in compose topology (catalog2, orders2).'
     }
-    if (-not (Wait-Healthy $BaseUrl 30)) {
+    # Phase 7: the gateway's public port no longer serves /health (recon
+    # oracle; management port only), so readiness is the dashboard itself.
+    $gwUp = $false
+    for ($i = 0; $i -lt 60; $i++) {
+        try { if ((Invoke-WebRequest $BaseUrl -UseBasicParsing -TimeoutSec 3).StatusCode -eq 200) { $gwUp = $true; break } } catch {}
+        Start-Sleep -Milliseconds 500
+    }
+    if (-not $gwUp) {
         throw 'Gateway must be running before test-failures.ps1 in compose topology.'
     }
 }
@@ -216,19 +223,30 @@ if ($mintedHeader) {
 Check 'correlation id forwarded to Catalog log' ((Read-ServiceLog $catalogLog 'catalog') -match [regex]::Escape($corrId))
 
 if ($Topology -eq 'compose') {
-    $instances = @{}
+    # Phase 7: X-Instance is stripped at the gateway egress (pod-name
+    # disclosure), so replica balance is attributed from each container's
+    # OWN logs across a burst of marked requests (per-container evidence,
+    # not response headers).
+    $balanceMarker = [guid]::NewGuid().ToString('N')
     foreach ($i in 1..12) {
-        $r = Get-Dashboard
-        if ($r.StatusCode -eq 200) {
-            $inst = ($r.Headers['X-Instance'] | Select-Object -First 1)
-            if ($inst) { $instances[$inst] = $true }
-        }
+        Invoke-WebRequest ($BaseUrl + '/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60 -Headers @{ 'X-Correlation-ID' = $balanceMarker } | Out-Null
     }
-    Check 'browser traffic lands on both frontend replicas' ($instances.Count -eq 2)
+    $serving = @()
+    foreach ($svc in 'frontend', 'frontend2') {
+        if ((docker compose logs $svc 2>$null | Select-String ([regex]::Escape($balanceMarker))).Count -gt 0) { $serving += $svc }
+    }
+    Check 'browser traffic lands on both frontend replicas' ($serving.Count -eq 2)
 
-    $gwCorr = 'gwprobe-' + [guid]::NewGuid().ToString('N')
-    $r = Invoke-WebRequest ($BaseUrl + '/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60 -Headers @{ 'X-Correlation-ID' = $gwCorr }
-    Check 'gateway passes correlation id through unchanged' (($r.Headers['X-Correlation-ID'] | Select-Object -First 1) -eq $gwCorr)
+    # Phase 7: the gateway validates inbound correlation ids (32 hex) and
+    # replaces non-conforming ones - a client-settable logged field must
+    # not pass unvalidated. Both directions asserted.
+    $gwValid = [guid]::NewGuid().ToString('N')
+    $r = Invoke-WebRequest ($BaseUrl + '/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60 -Headers @{ 'X-Correlation-ID' = $gwValid }
+    Check 'gateway passes valid correlation id through unchanged' (($r.Headers['X-Correlation-ID'] | Select-Object -First 1) -eq $gwValid)
+    $gwJunk = 'gwprobe-' + [guid]::NewGuid().ToString('N')
+    $r = Invoke-WebRequest ($BaseUrl + '/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60 -Headers @{ 'X-Correlation-ID' = $gwJunk }
+    $replaced = ($r.Headers['X-Correlation-ID'] | Select-Object -First 1)
+    Check 'gateway replaces non-conforming correlation id' ($null -ne $replaced -and $replaced -ne $gwJunk -and $replaced.Length -eq 32)
     $r = Invoke-WebRequest ($BaseUrl + '/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60
     $gwMinted = ($r.Headers['X-Correlation-ID'] | Select-Object -First 1)
     Check 'gateway mints correlation id when absent' ($null -ne $gwMinted -and $gwMinted.Length -eq 32)
@@ -380,47 +398,47 @@ if ($RedisMode) {
 }
 
 if ($Topology -eq 'compose') {
+    # Phase 7: X-Instance is stripped at the gateway egress, so failover
+    # attribution uses marked bursts + per-container log grep.
+    function Test-MarkerServed([string]$service, [string]$marker) {
+        ((docker compose logs $service 2>$null | Select-String ([regex]::Escape($marker))).Count -gt 0)
+    }
     $hostByService = @{}
     foreach ($svc in 'frontend', 'frontend2') {
         $hostName = (docker compose exec -T $svc printenv HOSTNAME 2>$null | Out-String).Trim()
         if ($hostName) { $hostByService[$svc] = $hostName }
     }
     if ($hostByService.Count -eq 2) {
-        $victimInstance = $hostByService['frontend2'] + ':1'
-        $survivorInstance = $hostByService['frontend'] + ':1'
-        $victimSeen = $false
-        foreach ($i in 1..8) {
-            $r = Get-Dashboard
-            if ((($r.Headers['X-Instance'] | Select-Object -First 1) -eq $victimInstance)) { $victimSeen = $true; break }
+        $preMarker = [guid]::NewGuid().ToString('N')
+        foreach ($i in 1..12) {
+            Invoke-WebRequest ($BaseUrl + '/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60 -Headers @{ 'X-Correlation-ID' = $preMarker } | Out-Null
         }
+        $victimSeen = (Test-MarkerServed 'frontend2' $preMarker) -and (Test-MarkerServed 'frontend' $preMarker)
         if ($victimSeen) {
             docker compose stop frontend2 | Out-Null
             Start-Sleep 10
             $shifted = $false
-            foreach ($i in 1..30) {
-                $ok = $true
-                foreach ($j in 1..5) {
-                    $r = Get-Dashboard
-                    $servedBy = ($r.Headers['X-Instance'] | Select-Object -First 1)
-                    if ($r.StatusCode -ne 200 -or $servedBy -ne $survivorInstance) { $ok = $false; break }
+            foreach ($i in 1..15) {
+                $postMarker = [guid]::NewGuid().ToString('N')
+                $allOk = $true
+                foreach ($j in 1..6) {
+                    $r = Invoke-WebRequest ($BaseUrl + '/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60 -Headers @{ 'X-Correlation-ID' = $postMarker }
+                    if ($r.StatusCode -ne 200) { $allOk = $false; break }
                 }
-                if ($ok) { $shifted = $true; break }
+                if ($allOk -and (Test-MarkerServed 'frontend' $postMarker) -and -not (Test-MarkerServed 'frontend2' $postMarker)) { $shifted = $true; break }
                 Start-Sleep 2
             }
             Check 'killing one backend shifts traffic to the survivor (200s, survivor only)' $shifted
             docker compose start frontend2 | Out-Null
+            $deadline2 = (Get-Date).AddSeconds(120)
             $bothAgain = $false
-            foreach ($i in 1..45) {
-                $seen = @{}
-                foreach ($j in 1..10) {
-                    $r = Get-Dashboard
-                    if ($r.StatusCode -eq 200) {
-                        $inst = ($r.Headers['X-Instance'] | Select-Object -First 1)
-                        if ($inst) { $seen[$inst] = $true }
-                    }
+            while ((Get-Date) -lt $deadline2 -and -not $bothAgain) {
+                $rejoinMarker = [guid]::NewGuid().ToString('N')
+                foreach ($i in 1..12) {
+                    Invoke-WebRequest ($BaseUrl + '/') -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 60 -Headers @{ 'X-Correlation-ID' = $rejoinMarker } | Out-Null
                 }
-                if ($seen.Count -eq 2) { $bothAgain = $true; break }
-                Start-Sleep 2
+                if ((Test-MarkerServed 'frontend2' $rejoinMarker) -and (Test-MarkerServed 'frontend' $rejoinMarker)) { $bothAgain = $true; break }
+                Start-Sleep 5
             }
             Check 'restarted backend rejoins rotation' $bothAgain
         }

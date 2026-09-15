@@ -2,7 +2,7 @@ param(
     [string[]]$Ops = @('dashboard', 'products-page', 'catalog-read', 'orders-read', 'orders-write'),
     [string]$Dur = '20s',
     [string]$OutFile = 'load\baseline-results.md',
-    [string]$FrontUrl = 'http://localhost:8081',
+    [string]$FrontUrl = 'http://127.0.0.1:8081',
     [switch]$All
 )
 

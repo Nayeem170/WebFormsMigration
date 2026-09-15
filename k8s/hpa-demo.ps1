@@ -2,8 +2,8 @@
 # with suites green at both ends. Per-pod positive controls: a scaled-up pod
 # must be shown to have SERVED traffic (per-pod logs), not merely Ready.
 param(
-    [string]$GatewayUrl = 'http://localhost:18080',
-    [string]$OrdersUrl = 'http://localhost:18095'
+    [string]$GatewayUrl = 'http://127.0.0.1:18080',
+    [string]$OrdersUrl = 'http://127.0.0.1:18095'
 )
 $ErrorActionPreference = 'Stop'
 $failures = 0

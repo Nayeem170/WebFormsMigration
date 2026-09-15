@@ -1227,6 +1227,188 @@ on a non-loopback interface only with all of the above in place.
 
 Rollback: back to loopback bindings; security configuration is additive.
 
+Phase 7 decisions (recorded before any code, per review):
+
+- SEQUENCING RULE (the structural point): the exit criteria bundle
+  "unauthenticated writes rejected" with "answers on a non-loopback
+  interface", but they are not peers. Everything else here is additive and
+  reversible; the bind change is the one step that cannot be un-exposed on
+  a shared network. The bind change is the LAST commit of the phase and is
+  gated on the auth test passing WHILE STILL LOOPBACK-BOUND. The dangerous
+  partial state is TLS and the listener landing before authorization is
+  enforced on every write path; every intermediate commit must leave the
+  stack safe overnight (loopback-bound or auth-enforcing).
+- Blunt fact, recorded: the services have no authentication and will not
+  after Phase 7. POST/PUT/DELETE on Catalog, /api/products/reserve, and
+  every Orders write endpoint remain completely unauthenticated; the only
+  thing between them and any caller is network reachability. That makes
+  NetworkPolicy load-bearing in a way nothing else in this plan is:
+  default-deny ingress with EXPLICIT allows (not allows over an open
+  default), verified by a negative test with a positive control - exec
+  into a pod that must NOT have access and see the call fail, then the
+  same call from Frontend's pod succeed. A deny that was never configured
+  looks identical to a deny that works. Compose networks cannot express
+  default-deny the same way, so k8s is the REFERENCE topology for this
+  phase's security posture; compose remains the functional-parity runner.
+  kind's default CNI does not enforce NetworkPolicy - the cluster is
+  rebuilt with Calico when this phase lands.
+- Authorization decision: reads stay public (public catalog is the
+  product), writes require an authenticated user. At the gateway this
+  maps to: GET/HEAD/OPTIONS pass; every other method (the WebForms
+  postbacks POST to Default/Orders/Products .aspx, plus any future API
+  surface) requires authentication. IdP for local verification: Keycloak
+  (container in both topologies, realm imported from
+  infra/keycloak/corewebforms-realm.json). Browser flows use OIDC code
+  flow + cookie sessions; automated verification uses the JWT bearer path
+  (direct access grant against the local realm - enabled for local test
+  automation ONLY, recorded). The WebForms session-expiry edge is decided
+  deliberately: sliding expiration sized to cover a working session, and
+  a POST arriving unauthenticated redirects to the IdP (the postback body
+  is lost; that is accepted and recorded rather than discovered during
+  smoke). Cookie attributes: SameSite=None; Secure on OIDC correlation
+  and nonce cookies (form_post callbacks), session cookie Secure once TLS
+  terminates at the gateway.
+- ForwardedHeaders vs rate limiting: the gateway clears KnownProxies and
+  KnownNetworks (pod IPs are dynamic), which makes X-Forwarded-For
+  attacker-controlled. Mitigations, all three: (1) the gateway
+  OVERWRITES X-Forwarded-For from the real socket address rather than
+  appending to what arrived; (2) NetworkPolicy guarantees nothing but the
+  gateway reaches Frontend directly, so the overwrite is trustworthy at
+  the only consumer that matters; (3) the rate limiter partitions on
+  Connection.RemoteIpAddress - the socket - registered BEFORE any header
+  parsing, so a rotated XFF header cannot buy quota. Per-IP and global
+  fixed windows; 429 on excess.
+- Egress hygiene (correct internally, wrong once public): the gateway
+  STRIPS X-Instance (machine:pid = pod name in k8s; discloses naming and
+  replica-count signal) from responses on egress - it is not removed from
+  services, the suites read it inside the network and keep working.
+  X-Gateway-Instance gets the same treatment (same disclosure class).
+  /health/live and /health/ready are not routable from outside: the
+  gateway serves them on a separate MANAGEMENT PORT only (probes point
+  there; the public port returns 404 for /health*). /health/ready reports
+  Redis and DB reachability - free reconnaissance and an attack-timing
+  oracle. X-Correlation-ID from external clients is VALIDATED (32 hex
+  chars, the gateway's own mint format) and replaced when non-conforming
+  - an attacker must not control a logged field (newline injection,
+  forged correlation, Phase 8 forged trace attributes).
+- Credentials, made explicit: compose.yaml carries POSTGRES_PASSWORD
+  localdev and connection strings in git, and k8s/apply.ps1 parses the
+  password back out of compose.yaml to build the Secret - the Secret is
+  exactly as secret as the repository. DECISION: these are LOCAL-ONLY
+  development credentials; they must never be pointed at a real database,
+  and the apply.ps1 parse-path must be replaced with a real secret source
+  before any non-local target exists. Writing that down is what stops
+  someone reusing apply.ps1 against a shared cluster later. The plan's
+  "never in compose files or git" applies the moment there is a real
+  secret to keep.
+- Migrator role, narrowed to match Phase 2's design: the migrator no
+  longer connects as postgres (superuser); infra/postgres-init.sql adds
+  ccw_migrator (DDL) alongside ccw_app (DML), with default privileges so
+  migrator-created objects are DML-granted to ccw_app. Both topologies
+  start from FRESH volumes for this change (objects in existing volumes
+  are postgres-owned); recorded.
+- Exposure mechanics for the final step: kubectl port-forward
+  --address 0.0.0.0 (or kind extraPortMappings on a rebuilt cluster), on
+  the TLS port, as the last commit - reversible by killing the process.
+
+Phase 7 execution record (2026-09-15, part 1 - loopback-bound):
+
+- Sequencing honored: everything below landed and was verified while the
+  stack stayed loopback-bound. The non-loopback bind is NOT in this
+  commit set; its gate (auth tests green while loopback) now passes on
+  both topologies. Explicitly deferred to the remaining work: Calico
+  cluster rebuild + default-deny NetworkPolicy + its negative/positive
+  test, and the final bind commit.
+- IdP: Keycloak 26.2 (container in both topologies, realm from
+  infra/keycloak/corewebforms-realm.json, public client + audience
+  mapper + tester user; direct access grants enabled for LOCAL test
+  automation only - recorded deviation). Bring-up lessons: the keycloak
+  image has no curl and its healthcheck must be a bash TCP-connect in
+  exec form (a malformed printf HTTP request hangs grep forever);
+  the issuer must be pinned via full-URL KC_HOSTNAME - request-derived
+  issuers disagree between the internal and published interfaces, and
+  pinning the EXTERNAL hostname makes the discovery document point the
+  gateway at a URL unreachable from its own container (JWKS fetch
+  fails). Pinned to the INTERNAL http://keycloak:8080: tokens minted via
+  the published port carry the pinned issuer and validate; interactive
+  browser login additionally needs a hosts-file entry (127.0.0.1
+  keycloak), documented.
+- Gateway hardening journey (each step caught by the auth test, not by
+  review): JwtBearer/OpenIdConnect packages must be explicit in the
+  csproj (not in the 9.0 container's shared framework);
+  RequireHttpsMetadata=false is the recorded internal-plain-HTTP
+  deviation; PolicyScheme needed ForwardChallenge=oidc - challenging the
+  cookie scheme redirects to /Account/Login, which is not an IdP; the
+  OIDC handler defaults to response_type=id_token (implicit), which
+  Keycloak 26 rightly refuses - set to code; and the handler
+  auto-attempts PAR (Keycloak advertises it), which failed until the
+  127.0.0.1 redirect URIs were registered alongside localhost.
+- THE REVIEW'S WARNED TRAP MATERIALIZED, live: ForwardedHeadersMiddleware
+  with cleared knowns ran BEFORE the rate limiter and rewrote
+  Connection.RemoteIpAddress from the client-supplied X-Forwarded-For.
+  The XFF-rotation check caught it (rotating the header bought unlimited
+  quota: 0 x 429 while a plain request 429'd). Fix: no
+  ForwardedHeadersMiddleware at all - X-Forwarded-For is written by hand
+  from the untouched socket, X-Forwarded-Proto from the listener scheme,
+  and the limiter partitions on the socket forever. The ForwardedHeaders
+  "correct internal, wrong once public" guidance is now implemented at
+  the only layer that can see the true socket.
+- A quieter sibling of the same class: the first rate-limiter wiring
+  attached a NAMED policy and a loose global limiter - but
+  UseRateLimiter only applies the GlobalLimiter unconditionally; the
+  named per-IP policy was dead code and a 600-burst never tripped. The
+  per-IP fixed window (500/10s, headroom for Phase 5's single-IP 408 rps
+  benchmark) IS the GlobalLimiter now, and the test's re-heat step had
+  to learn that a sub-window burst can never trip a 500-limit window.
+- Egress hygiene (all verified): X-Instance and X-Gateway-Instance
+  stripped at the gateway; /health* 404 on the public port, 200 on the
+  management port 8090 (compose healthcheck and k8s probes moved there);
+  correlation ids validated (32 hex) or replaced. Suite drift that
+  followed, deliberately: 'gateway passes correlation id through
+  unchanged' split into valid-passes + junk-replaced (compose suite is
+  40 checks now); the X-Instance-based replica-balance and
+  gateway-failover sections rewritten to marked-burst + per-container
+  log attribution (stronger evidence than response headers anyway);
+  test-k8s markers are full 32-hex to survive validation; the suite's
+  gateway precheck probes the dashboard because /health 404s by design.
+- Migrator role: ccw_migrator (DDL) + ccw_app (DML) in
+  infra/postgres-init.sql, migrator connection strings in both
+  topologies switched off the postgres superuser, both topologies on
+  fresh volumes (recorded cost: the soft-deleted-row ledger restarted
+  from zero). The k8s fresh-volume rollout exercised the role
+  end-to-end: empty database, initContainer migrations as ccw_migrator,
+  apps running as ccw_app.
+- Kestrel endpoints env overrides Urls entirely - the main 8080 listener
+  vanished when only Https/Management endpoints were declared (explicit
+  Http endpoint added); k8s multi-port Services require names on every
+  port (the apply error surfaced only as a dead TLS port-forward).
+- Environment note, recorded because it cost an hour: after today's
+  Docker restarts, IPv6-loopback SYNs to published ports are silently
+  dropped (no listener, no RST - WFP debris), so every http://localhost
+  URL pays a ~2s HappyEyeballs penalty per request. All scripts now use
+  explicit 127.0.0.1 (client-side strings only). Port-forwards still
+  pin one backing pod and die silently on rollout (recurring lesson).
+- Verification state at this commit: auth 11/11 compose AND 11/11 k8s
+  (public reads, 401/302 write rejection, bearer acceptance and
+  invalid-token rejection, 429 trips with 105 throttled, XFF rotation
+  buys nothing, TLS terminates); k8s battery 27/27 (health gating,
+  diversity 2 of 2 pods, correlation to pod logs, DB-loss readiness
+  still intact); compose suite 40/40 + smoke 11/11 on the final image;
+  both exposure checks all-pass (compose default shape loopback-only,
+  k8s ClusterIP-only). Facts and the local bare suite were not rerun:
+  this phase changed gateway code and compose/k8s wiring only, no
+  service code and no bare-topology path.
+- Frontend honoring of X-Forwarded-Proto: no current consumer (the
+  pages emit relative URLs); recorded as additive when a page needs
+  absolute URLs.
+- REMAINING for Phase 7 completion (next session, in order): (1) rebuild
+  the kind cluster with a policy-capable CNI (kindnet does not enforce
+  NetworkPolicy), default-deny ingress + explicit allows, negative test
+  with positive control (exec from a pod that must be denied, same call
+  from frontend's pod succeeds); (2) the final non-loopback bind on TLS
+  as the last commit, gated on the auth suite above; (3) optionally the
+  interactive browser login walkthrough (hosts entry + cookie flow).
+
 ### Phase 8 - Observability
 
 Goal: see which instance did what, and know before users do.

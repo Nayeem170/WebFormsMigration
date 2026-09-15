@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$BaseUrl,
-    [string]$CatalogUrl = 'http://localhost:8094',
-    [string]$OrdersUrl = 'http://localhost:8095'
+    [string]$CatalogUrl = 'http://127.0.0.1:8094',
+    [string]$OrdersUrl = 'http://127.0.0.1:8095'
 )
 
 $ErrorActionPreference = 'Stop'

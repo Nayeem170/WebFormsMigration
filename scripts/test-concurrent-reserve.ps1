@@ -1,6 +1,6 @@
 param(
     [int[]]$Ns = @(8, 16, 32, 64, 128, 256),
-    [string]$CatalogUrl = 'http://localhost:8094',
+    [string]$CatalogUrl = 'http://127.0.0.1:8094',
     [string]$CatalogUrl2 = '',
     [string]$OutFile = 'load\concurrent-reserve.md'
 )

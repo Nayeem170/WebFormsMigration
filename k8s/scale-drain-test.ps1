@@ -11,8 +11,8 @@
 #   - any non-201 is a bounded 502/503, never a 500
 #   - catalog replicas stayed at 2 throughout (no HPA confound)
 param(
-    [string]$OrdersUrl = 'http://localhost:18095',
-    [string]$CatalogUrl = 'http://localhost:18094',
+    [string]$OrdersUrl = 'http://127.0.0.1:18095',
+    [string]$CatalogUrl = 'http://127.0.0.1:18094',
     [int]$OrderCount = 60,
     [int]$DeleteAtIteration = 20
 )
@@ -29,7 +29,7 @@ function Psql([string]$db, [string]$sql) {
 # current probe fails.
 function Ensure-Forward([int]$localPort, [string]$service, [int]$svcPort) {
     $ok = $false
-    try { Invoke-WebRequest "http://localhost:$localPort/health" -UseBasicParsing -TimeoutSec 3 | Out-Null; $ok = $true } catch { }
+    try { Invoke-WebRequest "http://127.0.0.1:$localPort/health" -UseBasicParsing -TimeoutSec 3 | Out-Null; $ok = $true } catch { }
     if ($ok) { return }
     $owner = Get-NetTCPConnection -LocalPort $localPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($owner) { Stop-Process -Id $owner.OwningProcess -Force -ErrorAction SilentlyContinue; Start-Sleep 1 }
@@ -38,7 +38,7 @@ function Ensure-Forward([int]$localPort, [string]$service, [int]$svcPort) {
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 500
         $up = $false
-        try { Invoke-WebRequest "http://localhost:$localPort/health" -UseBasicParsing -TimeoutSec 3 | Out-Null; $up = $true } catch { }
+        try { Invoke-WebRequest "http://127.0.0.1:$localPort/health" -UseBasicParsing -TimeoutSec 3 | Out-Null; $up = $true } catch { }
         if ($up) { return }
     }
     throw "port-forward $service->$localPort did not come up"
