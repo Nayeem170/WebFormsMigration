@@ -64,6 +64,22 @@ Check "products row count label matches active-only total (claims $rowCountClaim
 $orders = GetPage '/Pages/Orders/'
 Check 'orders page renders order rows' (([regex]::Matches($orders, '<tr')).Count -gt 3)
 
+# Subresource parity across replicas (found via a REAL browser off-host):
+# WebForms script resources are DataProtection tokens validated by whichever
+# frontend replica serves the fetch. If one replica's key ring is stale,
+# tokens minted by the other 404 -> dead postbacks in real browsers while
+# document-only checks stay green. Mint and fetch through the SAME edge
+# repeatedly so round-robin crosses replicas.
+1..4 | ForEach-Object {
+    $p = GetPage '/'
+    $res = [regex]::Match($p, '(?i)(?:src|href)\s*=\s*["'']([^"''<>]*__webforms/resource[^"''<>]*)')
+    if (-not $res.Success) { Check "round ${_}: page carries a webforms resource token" $false; return }
+    $u = $res.Groups[1].Value -replace '&amp;', '&'
+    $full = if ($u.StartsWith('http')) { $u } else { $BaseUrl.TrimEnd('/') + '/' + $u.TrimStart('/') }
+    $code = (Invoke-WebRequest $full -UseBasicParsing -SkipHttpErrorCheck -TimeoutSec 30).StatusCode
+    Check "round ${_}: webforms resource token validates across replicas (${code})" ($code -eq 200)
+}
+
 $catalogProduct = Invoke-RestMethod "$CatalogUrl/api/products/1"
 $baselineStock = $catalogProduct.Stock
 Check "baseline product 1 stock readable ($baselineStock)" ($null -ne $baselineStock)

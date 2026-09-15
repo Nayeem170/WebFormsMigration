@@ -26,20 +26,21 @@ $expected = @{
     'gateway'        = @(8080, 8443)
     'postgres'       = @(15432)
     'redis'          = @(16379)
-    'keycloak'       = @(18081)
     'catalog'        = @(18094)
     'orders'         = @(18095)
+    'catalog2'       = @(18096)
+    'orders2'        = @(18097)
     'frontend'       = @()
     'frontend2'      = @()
-    'catalog2'       = @()
-    'orders2'        = @()
     'catalog-migrator' = @()
     'orders-migrator'  = @()
 }
 
 # One port may leave loopback, ever: gateway TLS. Plain-HTTP 8080 stays
-# loopback even after the bind - the exposed surface is TLS-only.
-$nonLoopbackAllowed = if ($OpenedGate) { @(@('gateway', 8443)) } else { @() }
+# loopback even after the bind - the exposed surface is TLS-only. Keyed
+# 'service/port' (a nested @(@(...)) would flatten in PS and silently
+# match nothing - the bug this line had on first use).
+$nonLoopbackAllowed = if ($OpenedGate) { @{ 'gateway/8443' = $true } } else { @{} }
 
 $seen = @{}
 foreach ($svc in $services) {
@@ -54,7 +55,7 @@ foreach ($svc in $services) {
             Check "$name port $port->/$($pub.TargetPort) is in the EXPECTED set" $false 'unexpected host publish'
             continue
         }
-        $mayExpose = $nonLoopbackAllowed | Where-Object { $_[0] -eq $name -and [int]$_[1] -eq $port }
+        $mayExpose = $nonLoopbackAllowed.ContainsKey("$name/$port")
         $ip = $pub.URL
         $bindsLoopback = ($ip -eq '127.0.0.1')
         Check "$name port $port->/$($pub.TargetPort) binds $(if ($mayExpose) { 'an allowed ' } else { 'loopback only ' })($ip)" `
