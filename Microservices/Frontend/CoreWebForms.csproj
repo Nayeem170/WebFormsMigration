@@ -36,7 +36,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="Content\**\*;Scripts\**\*" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="Content\**\*;Scripts\**\*;Pages\**\*.css;Pages\**\*.js" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
