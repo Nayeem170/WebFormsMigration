@@ -44,7 +44,10 @@ else {
         [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature -bor
         [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::KeyEncipherment, $true))
     $raw = $req.CreateSelfSigned([DateTimeOffset]::UtcNow.AddDays(-1), [DateTimeOffset]::UtcNow.AddYears(5))
-    $withKey = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::CopyWithPrivateKey($raw, $rsa)
+    # CreateSelfSigned associates the key on modern .NET; CopyWithPrivateKey
+    # throws on an already-associated cert, so branch on HasPrivateKey.
+    $withKey = if ($raw.HasPrivateKey) { $raw }
+        else { [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::CopyWithPrivateKey($raw, $rsa) }
     [System.IO.File]::WriteAllBytes($out, $withKey.Export(
         [System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $Password))
     $rsa.Dispose()
