@@ -2,6 +2,8 @@
   "realm": "corewebforms",
   "enabled": true,
   "sslRequired": "none",
+  "bruteForceProtected": true,
+  "failureFactor": 3,
   "clients": [
     {
       "clientId": "gateway",
@@ -9,7 +11,7 @@
       "protocol": "openid-connect",
       "publicClient": true,
       "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": true,
+      "directAccessGrantsEnabled": false,
       "redirectUris": [
         "http://localhost:8080/signin-oidc",
         "http://127.0.0.1:8080/signin-oidc",
@@ -21,7 +23,28 @@
         "https://127.0.0.1:18443/signin-oidc"
       ],
       "webOrigins": ["http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:18080", "http://127.0.0.1:18080", "https://localhost:8443", "https://127.0.0.1:8443", "https://localhost:18443", "https://127.0.0.1:18443"],
-      "attributes": { "post.logout.redirect.uris": "http://localhost:8080/*" },
+      "attributes": { "post.logout.redirect.uris": "http://localhost:8080/*", "pkce.code.challenge.method": "S256" },
+      "protocolMappers": [
+        {
+          "name": "audience-gateway",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "gateway",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "ccw-suite",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
       "protocolMappers": [
         {
           "name": "audience-gateway",
@@ -46,6 +69,16 @@
       "lastName": "User",
       "credentials": [
         { "type": "password", "value": "localdev-tester", "temporary": false }
+      ]
+    },
+    {
+      "username": "bf-probe",
+      "enabled": true,
+      "email": "bf-probe@corewebforms.local",
+      "firstName": "BruteForce",
+      "lastName": "Probe",
+      "credentials": [
+        { "type": "password", "value": "bf-probe-pw", "temporary": false }
       ]
     }
   ]
