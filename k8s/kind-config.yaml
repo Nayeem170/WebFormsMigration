@@ -6,6 +6,14 @@
 # which apply.ps1 waits out explicitly before applying the stack.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
+# Two nodes: app CPU requests sum to 2900m (2x catalog 500m, 2x orders
+# 500m, 2x frontend 250m, gateway 100m, postgres 250m, redis 50m) and a
+# single control-plane node on a 4-vCPU CI runner has ~3000m schedulable
+# after system reservations - the gateway pod FailedScheduling'd on
+# exactly that margin. kind load docker-image covers all nodes.
+nodes:
+- role: control-plane
+- role: worker
 networking:
   disableDefaultCNI: true
   # Must match CALICO_IPV4POOL_CIDR in the patched calico.yaml.
