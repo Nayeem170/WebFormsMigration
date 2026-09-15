@@ -91,6 +91,37 @@ namespace CoreWebForms.UnitTests
             Assert.False(StockRules.IsUniqueViolation(new DbUpdateException("bare"), "ReservationKeys"));
         }
 
+        // --- lock-state classification for the metric label ---------------
+
+        [Theory]
+        [InlineData("55P03", "55P03")]
+        [InlineData("40P01", "40P01")]
+        [InlineData("53300", "53300")]
+        public void TransientLockSqlState_NamesPostgresStates(string sqlState, string expected)
+        {
+            Assert.Equal(expected, StockRules.TransientLockSqlState(Pg(sqlState)));
+        }
+
+        [Fact]
+        public void TransientLockSqlState_WalksInnerChain()
+        {
+            var ex = new InvalidOperationException("outer", new DbUpdateException("mid", Pg("40P01")));
+            Assert.Equal("40P01", StockRules.TransientLockSqlState(ex));
+        }
+
+        [Fact]
+        public void TransientLockSqlState_SqliteBusy()
+        {
+            Assert.Equal("SQLITE_BUSY", StockRules.TransientLockSqlState(Sqlite(5, "database is locked")));
+        }
+
+        [Fact]
+        public void TransientLockSqlState_NullForNonLock()
+        {
+            Assert.Null(StockRules.TransientLockSqlState(Pg("23505")));
+            Assert.Null(StockRules.TransientLockSqlState(new InvalidOperationException("no db")));
+        }
+
         // --- lock ordering ---------------------------------------------------
 
         [Fact]

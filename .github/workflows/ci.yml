@@ -52,5 +52,8 @@ jobs:
       - name: Failure-injection suite (compose topology)
         run: pwsh scripts/test-failures.ps1 -Topology compose
 
+      - name: Observability controls (traces, metrics, key-ring, readiness)
+        run: pwsh scripts/test-observability.ps1
+
       - name: Exposure check (every published port loopback)
         run: pwsh scripts/check-exposure.ps1

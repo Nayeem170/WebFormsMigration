@@ -134,7 +134,7 @@ namespace CoreWebForms.CharacterizationTests
             // "retry" by design - so a well-behaved client retries 503s.
             // The invariant under test (no oversell, all units granted
             // exactly once) is asserted on the FINAL statuses either way.
-            async Task<(int Status, string Body)> ReserveOnce(string key)
+            async Task<(int Status, string Body, int Attempts)> ReserveOnce(string key)
             {
                 var body = new JsonObject
                 {
@@ -144,13 +144,13 @@ namespace CoreWebForms.CharacterizationTests
                         new JsonObject { ["productId"] = id, ["quantity"] = 1 }
                     }
                 };
-                for (var attempt = 0; ; attempt++)
+                var attempt = 0;
+                for (; ; )
                 {
+                    attempt++;
                     var response = await Http.PostAsJsonAsync(CatalogBase + "/api/products/reserve", body);
-                    if ((int)response.StatusCode == 200 || attempt >= 3) 
-                        return ((int)response.StatusCode, await response.Content.ReadAsStringAsync());
-                    if ((int)response.StatusCode != 503)
-                        return ((int)response.StatusCode, await response.Content.ReadAsStringAsync());
+                    if ((int)response.StatusCode == 200 || attempt >= 4 || (int)response.StatusCode != 503)
+                        return ((int)response.StatusCode, await response.Content.ReadAsStringAsync(), attempt);
                     await Task.Delay(500);
                 }
             }
@@ -158,7 +158,8 @@ namespace CoreWebForms.CharacterizationTests
             var results = await Task.WhenAll(Enumerable.Range(0, n).Select(i => ReserveOnce($"conc-{_run}-{i}")));
             var statuses = results.Select(r => r.Status).ToArray();
             var failures = results.Where(r => r.Status != 200)
-                .Select(r => $"{r.Status}: {r.Body}");
+                .Select(r => $"{r.Status} (after {r.Attempts} attempts): {r.Body}");
+            var totalAttempts = results.Sum(r => r.Attempts);
 
             var successes = statuses.Count(s => s == 200);
             var reloaded = await GetProductAsync(id);
@@ -166,8 +167,12 @@ namespace CoreWebForms.CharacterizationTests
 
             Assert.True(stock >= 0, $"oversell: stock {stock} after {successes} successes");
             Assert.Equal(n - successes, stock);
+            // Bounded retry, asserted: a rising 503 rate must show up in the
+            // attempt count, not hide behind retries (each key gets at most
+            // 4 tries: 1 + 3 retries).
+            Assert.InRange(totalAttempts, n, n * 4);
             Assert.True(successes == n,
-                $"expected all {n} reserves to succeed, got {successes}; failures: [{string.Join(" | ", failures)}]");
+                $"expected all {n} reserves to succeed, got {successes} in {totalAttempts} attempts; failures: [{string.Join(" | ", failures)}]");
         }
 
         public void Dispose()

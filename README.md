@@ -40,6 +40,9 @@ catalog2 :8094 orders2 :8095
    +------+-------+
           v
    postgres :5432   ccw_catalog / ccw_orders, pool 20 per process
+
+   (all four apps + the otel-collector ship traces/metrics via OTLP;
+   logs are structured JSON on stdout - docker/kubectl logs is the source)
 ```
 
 k8s (k8s/*.yaml, kind via `k8s/apply.ps1`): same blocks as Deployments
@@ -56,6 +59,7 @@ suites can probe each replica directly.
 | `CoreWebForms.CharacterizationTests` (11) | Behavior parity of catalog/orders APIs against the live services | compose stack |
 | `scripts/smoke-parity.ps1` (15) | Gateway/page parity, API-derived page content, cross-replica `__webforms/resource` tokens (DataProtection ring) | compose stack |
 | `scripts/test-failures.ps1` | Failure injection: per-container pool counts, redis stop, replica kill, error propagation | compose stack |
+| `scripts/test-observability.ps1` | One request = one trace across >= 3 services; app meter flows; key-ring parity across replicas; redis kill flips readiness + key-ring monitors and recovers | compose stack |
 | `scripts/test-concurrent-reserve.ps1` | Concurrent reserve correctness ladder | stack |
 | `k8s/test-k8s.ps1` | k8s bring-up, health-split semantics, per-pod pool counts, correlation propagation | kind cluster |
 | `k8s/test-netpol.ps1` (14) | Calico-enforced default-deny with positive controls | kind cluster |

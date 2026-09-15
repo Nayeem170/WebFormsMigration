@@ -40,24 +40,20 @@ foreach ($dep in 'catalog', 'orders') {
 # its file logger (App_Data/logs/app.log, like bare/local mode); Orders
 # logs to console. Source per app, pod by pod, so one pod cannot mask
 # another's missing line.
-function Test-K8sPool([string]$app, [string]$poolName, [switch]$FromFile) {
+function Test-K8sPool([string]$app, [string]$poolName) {
     $pods = kubectl -n corewebforms get pods -l "app=$app" -o json | ConvertFrom-Json
     $running = @($pods.items | Where-Object { $_.status.phase -eq 'Running' })
     if ($running.Count -lt 1) { return $false }
     foreach ($pod in $running) {
-        if ($FromFile) {
-            $logs = kubectl -n corewebforms exec $pod.metadata.name -- sh -c "grep '$poolName endpoint pool' /app/App_Data/logs/app.log 2>/dev/null" 2>$null
-        } else {
-            $logs = kubectl -n corewebforms logs $pod.metadata.name 2>$null
-        }
+        $logs = kubectl -n corewebforms logs $pod.metadata.name 2>$null
         $hits = @($logs | Select-String "$poolName endpoint pool: (\d+) endpoint")
         if ($hits.Count -lt 1) { return $false }
         foreach ($hit in $hits) { if ([int]$hit.Matches[0].Groups[1].Value -ne 1) { return $false } }
     }
     return $true
 }
-Check 'frontend pods log Catalog pool with 1 endpoint each' (Test-K8sPool frontend 'Catalog' -FromFile)
-Check 'frontend pods log Orders pool with 1 endpoint each' (Test-K8sPool frontend 'Orders' -FromFile)
+Check 'frontend pods log Catalog pool with 1 endpoint each' (Test-K8sPool frontend 'Catalog')
+Check 'frontend pods log Orders pool with 1 endpoint each' (Test-K8sPool frontend 'Orders')
 Check 'orders pods log Catalog pool with 1 endpoint each' (Test-K8sPool orders 'Catalog')
 
 # --- health split ---------------------------------------------------------

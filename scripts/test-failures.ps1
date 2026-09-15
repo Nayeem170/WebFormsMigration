@@ -25,9 +25,12 @@ if ($Topology -eq 'compose') {
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$catalogLog = Join-Path $root 'Microservices\Catalog\App_Data\logs\app.log'
-$ordersLog = Join-Path $root 'Microservices\Orders\App_Data\logs\app.log'
-$frontendLog = Join-Path $root 'Microservices\Frontend\App_Data\logs\app.log'
+# File sinks are gone (Phase 8a: structured JSON stdout only). In local
+# topology the suite spawns the services, so it captures their stdout to
+# files; compose topology reads `docker compose logs`.
+$catalogLog = Join-Path $root 'Microservices\Catalog\App_Data\logs\stdout.log'
+$ordersLog = Join-Path $root 'Microservices\Orders\App_Data\logs\stdout.log'
+$frontendLog = Join-Path $root 'Microservices\Frontend\App_Data\logs\stdout.log'
 
 $failures = 0
 function Check([string]$name, [bool]$ok) {
@@ -87,10 +90,7 @@ function Start-Catalog() {
         Wait-Healthy $CatalogUrl 90 | Out-Null
         return
     }
-    $p = @{ FilePath = 'dotnet'; ArgumentList = (Join-Path $root 'Microservices\Catalog\bin\Debug\net9.0\Catalog.dll'); WorkingDirectory = (Join-Path $root 'Microservices\Catalog'); WindowStyle = 'Hidden' }
-    if ($PgMode) { $p.Environment = @{ Database__Provider = 'postgres'; Database__ConnectionString = 'Host=127.0.0.1;Port=15432;Database=ccw_catalog;Username=ccw_app;Password=localdev'; Database__Migrate = 'false' } }
-    Start-Process @p
-    Wait-Healthy $CatalogUrl 60 | Out-Null
+    Start-LocalService 'Catalog' $CatalogUrl
 }
 
 function Start-Orders() {
@@ -99,10 +99,29 @@ function Start-Orders() {
         Wait-Healthy $OrdersUrl 90 | Out-Null
         return
     }
-    $p = @{ FilePath = 'dotnet'; ArgumentList = (Join-Path $root 'Microservices\Orders\bin\Debug\net9.0\Orders.dll'); WorkingDirectory = (Join-Path $root 'Microservices\Orders'); WindowStyle = 'Hidden' }
-    if ($PgMode) { $p.Environment = @{ Database__Provider = 'postgres'; Database__ConnectionString = 'Host=127.0.0.1;Port=15432;Database=ccw_orders;Username=ccw_app;Password=localdev'; Database__Migrate = 'false' } }
+    Start-LocalService 'Orders' $OrdersUrl
+}
+
+function Start-LocalService([string]$name, [string]$healthUrl) {
+    $logDir = Join-Path $root "Microservices\$name\App_Data\logs"
+    New-Item -ItemType Directory -Force $logDir | Out-Null
+    $p = @{
+        FilePath = 'dotnet'
+        ArgumentList = (Join-Path $root "Microservices\$name\bin\Debug\net9.0\$name.dll")
+        WorkingDirectory = (Join-Path $root "Microservices\$name")
+        WindowStyle = 'Hidden'
+        RedirectStandardOutput = (Join-Path $logDir 'stdout.log')
+        RedirectStandardError = (Join-Path $logDir 'stderr.log')
+    }
+    if ($PgMode) {
+        $p.Environment = @{
+            Database__Provider = 'postgres'
+            Database__ConnectionString = "Host=127.0.0.1;Port=15432;Database=ccw_$($name.ToLower());Username=ccw_app;Password=localdev"
+            Database__Migrate = 'false'
+        }
+    }
     Start-Process @p
-    Wait-Healthy $OrdersUrl 60 | Out-Null
+    Wait-Healthy $healthUrl 60 | Out-Null
 }
 
 function Stop-CatalogSvc() {
