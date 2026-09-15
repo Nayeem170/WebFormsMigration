@@ -1,0 +1,15 @@
+PASS home shows Leo Garcia (newest seeded order)
+PASS home shows Karen Novak
+PASS products grid page 1 matches API-derived active-only page [Wireless Headphones, Mechanical Keyboard, USB-C Hub, Dev T-Shirt (M), Dev T-Shirt (L)]
+PASS products row count label matches active-only total (claims 11, expected 11)
+PASS orders page renders order rows
+PASS baseline product 1 stock readable (38)
+PASS place order -> 201
+PASS orders page shows Parity Run after place
+PASS stock after place is baseline - 3 (38 -> 35)
+PASS insufficient -> 409
+PASS insufficient message names the rule (Insufficient stock for product ID 1: requested 99999, available 35)
+PASS delete order -> 204
+PASS stock after delete is restored to baseline (38)
+PASS orders page shows Parity Run struck through after delete
+smoke-parity: all checks passed

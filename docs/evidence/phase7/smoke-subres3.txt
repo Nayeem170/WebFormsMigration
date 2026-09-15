@@ -1,0 +1,18 @@
+PASS home renders newest live order (API-derived)
+PASS products grid page 1 matches API-derived active-only page [Wireless Headphones, Mechanical Keyboard, USB-C Hub, Dev T-Shirt (M), Dev T-Shirt (L)]
+PASS products row count label matches active-only total (claims 11, expected 11)
+PASS orders page renders order rows
+PASS round 1: webforms resource token validates across replicas (200)
+PASS round 2: webforms resource token validates across replicas (200)
+PASS round 3: webforms resource token validates across replicas (200)
+PASS round 4: webforms resource token validates across replicas (200)
+PASS baseline product 1 stock readable (33)
+PASS place order -> 201
+PASS orders page shows Parity Run after place
+PASS stock after place is baseline - 3 (33 -> 30)
+PASS insufficient -> 409
+PASS insufficient message names the rule (Insufficient stock for product ID 1: requested 99999, available 30)
+PASS delete order -> 204
+PASS stock after delete is restored to baseline (33)
+PASS orders page shows Parity Run struck through after delete
+smoke-parity: all checks passed

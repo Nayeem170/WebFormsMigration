@@ -1,0 +1,52 @@
+PASS invalid order payload -> 400
+PASS invalid product payload -> 400
+PASS reserve replay is idempotent
+PASS probe stock restored
+PASS repeated product create is not idempotent (two rows)
+PASS correlation id echoed by Orders response header
+PASS correlation id echoed by Catalog response header
+PASS Frontend mints correlation id on page GET
+PASS Frontend correlation id reaches Catalog log
+PASS correlation id forwarded to Catalog log
+ Container corewebforms-catalog-1 Stopping 
+ Container corewebforms-catalog-1 Stopped 
+PASS stopped Catalog
+PASS dashboard degrades with Catalog down (message, no trace)
+PASS dashboard bounded wall-clock with Catalog down (6.4s < 25s)
+PASS place order fails 502 while Catalog down
+ Container corewebforms-postgres-1 Waiting 
+ Container corewebforms-postgres-1 Healthy 
+ Container corewebforms-catalog-migrator-1 Starting 
+ Container corewebforms-catalog-migrator-1 Started 
+ Container corewebforms-catalog-migrator-1 Waiting 
+ Container corewebforms-postgres-1 Waiting 
+ Container corewebforms-postgres-1 Healthy 
+ Container corewebforms-catalog-migrator-1 Exited 
+ Container corewebforms-catalog-1 Starting 
+ Container corewebforms-catalog-1 Started 
+PASS Frontend recovers after Catalog restart (no Frontend restart)
+ Container corewebforms-orders-1 Stopping 
+ Container corewebforms-orders-1 Stopped 
+PASS stopped Orders
+PASS dashboard degrades with Orders down
+PASS Orders API unreachable while stopped
+ Container corewebforms-postgres-1 Waiting 
+ Container corewebforms-postgres-1 Healthy 
+ Container corewebforms-orders-migrator-1 Starting 
+ Container corewebforms-orders-migrator-1 Started 
+ Container corewebforms-postgres-1 Waiting 
+ Container corewebforms-orders-migrator-1 Waiting 
+ Container corewebforms-postgres-1 Healthy 
+ Container corewebforms-orders-migrator-1 Exited 
+ Container corewebforms-orders-1 Starting 
+ Container corewebforms-orders-1 Started 
+PASS Frontend recovers after Orders restart
+ Container corewebforms-redis-1 Stopping 
+ Container corewebforms-redis-1 Stopped 
+PASS dashboard survives Redis down (content intact)
+PASS products page survives Redis down
+PASS orders page degrades with Redis down (message, no trace)
+ Container corewebforms-redis-1 Starting 
+ Container corewebforms-redis-1 Started 
+PASS orders page recovers after Redis restart
+test-failures: all checks passed

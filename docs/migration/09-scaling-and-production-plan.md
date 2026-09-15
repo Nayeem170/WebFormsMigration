@@ -165,7 +165,7 @@ Rollback: none needed; measurement only.
 
 Phase 0 execution record (2026-09-14):
 
-- Tooling: k6 2.2.0 (binary at `artifacts/tools/k6/`, not committed),
+- Tooling: k6 2.2.0 (not committed; install locally),
   `scripts/run-load.ps1` orchestrating `load/k6-scenarios.js`, and the
   concurrent sweep in `scripts/test-concurrent-reserve.ps1`. Numbers and
   raw summaries live in `load/` (`baseline.md`, `baseline-results.md`,
@@ -260,8 +260,8 @@ Phase 1 execution record (2026-09-14):
   warm-up must send a User-Agent - UA-less requests crash
   `ValidationSummary` via `HttpCapabilitiesBase` (pre-existing quirk; a
   UA-less load tool hitting the orders page triggers it too).
-- Before-state, from two distinct publish roots (`artifacts/phase1/
-  frontend-a` and `frontend-b`): the same-root control pair (two instances
+- Before-state, from two distinct publish roots (local-only build output,
+  not committed; reproduce the roots with `scripts/publish-local.ps1`): the same-root control pair (two instances
   of frontend-a on 8081/8083) already interoperate - shared
   `%LOCALAPPDATA%` ring, same discriminator - proving the reviewer's
   false-green warning. The distinct-root pair fails exactly as predicted:
@@ -489,8 +489,8 @@ Phase 2 execution record (2026-09-14):
   SUM(Price), SUM(Stock), SUM(Total), per-order Total == sum of item lines
   on both engines. Run green: sqlite backup (12 products/451 stock, 13
   orders/16 items, 1 reservation + 1 release key) now lives in pg.
-- Data state: sqlite files backed up to `artifacts/phase2/backup/` before
-  any pg work; the backup is the DbCopy source of record. pg now holds the
+- Data state: sqlite files backed up locally before any pg work (a safety
+  copy, not committed evidence); the backup is the DbCopy source of record. pg now holds the
   migrated dev data; canonical reseed = drop/recreate both DBs + grants +
   migrator (scripted; requires `pg_terminate_backend` first - live pooled
   connections block DROP, and the services briefly 500 while npgsql prunes
@@ -503,7 +503,7 @@ Phase 2 execution record (2026-09-14):
   restores). sqlite regression required wiping `App_Data/*.db*` and letting
   Migrate reseed - the regenerated migrations changed history ids and the
   old files carried stale ones.
-- Artifacts: `artifacts/phase2/concurrent-reserve-sqlite-baseline.md` (the
+- Artifacts: `docs/evidence/phase2/concurrent-reserve-sqlite-baseline.md` (the
   full 6-rung Phase 0-era sqlite ladder - the only surviving copy; it was
   briefly mislabeled `-pg`, caught in review), `concurrent-reserve-pg.md`
   (post-fix 4-rung pg sweep), `concurrent-reserve-sqlite-regression.md`
@@ -658,8 +658,8 @@ Phase 3 execution record (2026-09-14):
 - Standing state after the phase: the compose stack is the default running
   stack (all healthy); the bare `ccw-postgres`/`ccw-redis` containers are
   stopped (superseded by the compose postgres/redis on the same loopback
-  ports). Artifacts: `artifacts/phase3/failures-compose.txt`,
-  `artifacts/phase3/failures-local.txt`.
+  ports). Artifacts: `docs/evidence/phase3/failures-compose.txt`,
+  `docs/evidence/phase3/failures-local.txt`.
 
 ### Phase 4 - Request routing: the gateway
 
@@ -852,8 +852,8 @@ Phase 4 execution record (2026-09-14):
   all checks passed, 11/11 facts, same binaries (pool code active with a
   single-endpoint pool).
 - Standing state: compose stack on the default shape, all healthy, gateway
-  on 127.0.0.1:8080. Artifacts: `artifacts/phase4/failures-compose.txt`,
-  `artifacts/phase4/failures-local.txt`.
+  on 127.0.0.1:8080. Artifacts: `docs/evidence/phase4/failures-compose.txt`,
+  `docs/evidence/phase4/failures-local.txt`.
 
 ### Phase 5 - Scale-out proof: N replicas
 
@@ -973,7 +973,7 @@ Phase 5 execution record (2026-09-14):
 - Standing state: default-shape compose stack, 9 services healthy
   (2x frontend, 2x catalog, 2x orders, gateway, postgres, redis),
   exposure all-pass (catalog2/orders2 join the zero-published list).
-  Artifacts: artifacts/phase5/.
+  Artifacts: docs/evidence/phase5/.
 
 ### Phase 6 - Autoscaling: grow and shrink on metrics
 
@@ -1183,7 +1183,7 @@ Phase 6 execution record (2026-09-15):
   and the cluster came back with all pods Ready.
 - Standing state: compose default shape 9 healthy + exposure all-pass;
   kind cluster up (9 pods at min replicas, HPA metrics live, ClusterIP
-  only per k8s/check-exposure.ps1). Artifacts: artifacts/phase6/.
+  only per k8s/check-exposure.ps1). Artifacts: docs/evidence/phase6/.
 
 Rollback: fixed replica counts with the HPA removed; the cluster itself is
 disposable locally. Production target choice (managed K8s, App Service with
@@ -1645,7 +1645,10 @@ Phase 7 execution record (2026-09-15, part 3 - realm and edge hardening):
   unauthenticated GET /, page css, and a postback POST all 200 through
   the gateway; IdP route 404; keycloak container absent; 8443
   loopback-only again; exposure all-pass; netpol policy-count
-  expectation adjusted for the removed policy.
+  expectation adjusted for the removed policy. Evidence:
+  `docs/evidence/phase7/` (final no-auth smoke + subresource rounds,
+  failures suite, k8s/netpol runs, and the pre-removal test-auth runs
+  the record above cites).
 
 ### Phase 8 - Observability
 

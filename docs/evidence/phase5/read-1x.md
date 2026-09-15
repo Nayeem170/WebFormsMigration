@@ -1,0 +1,1 @@
+| op | vus | requests | rps | p95 ms | fail % | |---|---|---|---|---|---|| dashboard | 5 | 3355 | 223.5 | 21 | 0 | | dashboard | 25 | 6285 | 417.8 | 110 | 0 | | dashboard | 50 | 1192 | 79 | 0 | 0 | | products-page | 5 | 7443 | 496 | 19 | 0 | | products-page | 25 | 8392 | 558.8 | 59 | 0 | | products-page | 50 | 9497 | 631.8 | 99 | 0 |

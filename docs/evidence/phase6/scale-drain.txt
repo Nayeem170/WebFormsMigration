@@ -1,0 +1,14 @@
+PASS catalog at 2 replicas before drain (HPA not already scaling)
+PASS probe product created (id 29, stock 60)
+PASS baseline stock matches probe
+  iteration 20: deleting catalog pod catalog-56f9b79f6d-kplhk (SIGTERM drain)
+  results: 60 x 201, 0 non-201 ()
+PASS every 201 has exactly one order row (60 orders, 60 rows)
+PASS every order row charged exactly one item (60)
+PASS final stock is initial minus created orders (60 - 60 = 0, actual 0)
+PASS no unexpected failure statuses (only bounded 502/503 allowed)
+PASS at least the pre-drain orders all succeeded
+PASS catalog back at 2 ready replicas after replacement
+PASS orders pods never restarted
+  cleanup done (orders soft-deleted, probe product soft-deleted)
+scale-drain: all checks passed

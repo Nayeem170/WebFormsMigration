@@ -1,0 +1,33 @@
+PASS catalog deployment has 2 ready replicas
+PASS orders deployment has 2 ready replicas
+PASS frontend deployment has 2 ready replicas
+PASS gateway deployment has 1 ready replica
+PASS hpa catalog min/max is 2/4
+PASS hpa orders min/max is 2/4
+PASS hpa frontend min/max is 2/4
+PASS pdb catalog minAvailable 1
+PASS pdb orders minAvailable 1
+PASS pdb frontend minAvailable 1
+PASS catalog terminationGracePeriodSeconds 35
+PASS orders terminationGracePeriodSeconds 35
+PASS frontend pods log Catalog pool with 1 endpoint each
+PASS frontend pods log Orders pool with 1 endpoint each
+PASS orders pods log Catalog pool with 1 endpoint each
+PASS gateway /health/live answers 200
+PASS frontend /health/ready answers 200 through gateway
+PASS catalog pod /health/live answers ok
+PASS orders pod /health/live answers ok
+PASS catalog pod /health/ready answers ready
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+PASS catalog readiness sees DB loss (ready addresses empty)
+PASS catalog pods NOT restarted during DB loss (liveness stayed quiet)
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+PASS catalog readiness recovers when DB returns
+PASS diversity burst completed without request errors
+PASS Frontend->Catalog diversity: >= 2 catalog pods served the burst (2 of 2)
+PASS correlation id reaches catalog pod logs
+k8s verification: all checks passed

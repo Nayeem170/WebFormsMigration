@@ -1,0 +1,14 @@
+PASS GET / returns 200
+PASS home shows Leo Garcia (newest seeded order)
+PASS home shows Karen Novak
+PASS GET /Pages/Products/ returns 200
+FAIL products shows Wireless Headphones
+FAIL products shows Mechanical Keyboard
+PASS products hides out-of-stock Webcam HD
+PASS GET /Pages/Orders/ returns 200
+PASS orders page renders order rows
+Invoke-RestMethod: D:\Programming\.Net\CoreWebForms\scripts\smoke-parity.ps1:49
+Line |
+  49 |  $catalogProduct = Invoke-RestMethod "$CatalogUrl/api/products/1"
+     |                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | No connection could be made because the target machine actively refused it.

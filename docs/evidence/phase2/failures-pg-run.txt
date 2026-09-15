@@ -1,0 +1,19 @@
+PASS invalid order payload -> 400
+PASS invalid product payload -> 400
+PASS reserve replay is idempotent
+PASS probe stock restored
+PASS repeated product create is not idempotent (two rows)
+PASS correlation id reaches Orders log
+PASS correlation id forwarded to Catalog log
+PASS Frontend mints correlation id on page GET
+PASS Frontend correlation id reaches Catalog log
+PASS stopped Catalog by port
+PASS dashboard degrades with Catalog down (message, no trace)
+PASS dashboard bounded wall-clock with Catalog down (6.4s < 25s)
+PASS place order fails 502 while Catalog down
+PASS Frontend recovers after Catalog restart (no Frontend restart)
+PASS stopped Orders by port
+PASS dashboard degrades with Orders down
+PASS Orders API unreachable while stopped
+PASS Frontend recovers after Orders restart
+test-failures: all checks passed

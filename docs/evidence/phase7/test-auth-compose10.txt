@@ -1,0 +1,18 @@
+PASS public dashboard read stays public (200)
+PASS unauthenticated API write rejected 401
+PASS 401 advertises Bearer challenge
+PASS unauthenticated browser write redirects to IdP (302)
+PASS IdP redirect points at the realm authorize endpoint
+PASS password grant via suite client yields an access token
+PASS authenticated write passes the gate (not 401/403)
+PASS invalid token still rejected 401
+PASS browser login completes over the routed IdP (session cookie issued)
+PASS master realm has no token endpoint at the edge (no admin oracle)
+PASS authorize without PKCE challenge refused (server-enforced S256)
+PASS brute-force lockout denies the CORRECT password (per-account)
+PASS per-IP rate limit trips under 600-burst (118 x 429)
+PASS rotating X-Forwarded-For does not buy quota (limiter is socket-keyed)
+PASS TLS terminates at the gateway (answers over https)
+PASS ccw_app cannot CREATE TABLE (permission denied)
+PASS ccw_migrator can CREATE TABLE (positive control)
+test-auth: all checks passed

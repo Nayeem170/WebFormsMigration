@@ -1,0 +1,77 @@
+PASS invalid order payload -> 400
+PASS invalid product payload -> 400
+PASS reserve replay is idempotent
+PASS probe stock restored
+PASS repeated product create is not idempotent (two rows)
+PASS correlation id echoed by Orders response header
+PASS correlation id echoed by Catalog response header
+PASS Frontend mints correlation id on page GET
+PASS Frontend correlation id reaches Catalog log
+PASS correlation id forwarded to Catalog log
+PASS browser traffic lands on both frontend replicas
+PASS gateway passes correlation id through unchanged
+PASS gateway mints correlation id when absent
+PASS frontend logs resolved endpoint pools
+PASS orders logs resolved catalog endpoint pool
+ Container corewebforms-catalog-1 Stopping 
+ Container corewebforms-catalog-1 Stopped 
+PASS stopped Catalog
+PASS dashboard degrades with Catalog down (message, no trace)
+PASS dashboard bounded wall-clock with Catalog down (8.5s < 25s)
+PASS place order fails 502 while Catalog down
+ Container corewebforms-postgres-1 Waiting 
+ Container corewebforms-postgres-1 Healthy 
+ Container corewebforms-catalog-migrator-1 Starting 
+ Container corewebforms-catalog-migrator-1 Started 
+ Container corewebforms-catalog-migrator-1 Waiting 
+ Container corewebforms-postgres-1 Waiting 
+ Container corewebforms-postgres-1 Healthy 
+ Container corewebforms-catalog-migrator-1 Exited 
+ Container corewebforms-catalog-1 Starting 
+ Container corewebforms-catalog-1 Started 
+PASS Frontend recovers after Catalog restart (no Frontend restart)
+ Container corewebforms-orders-1 Stopping 
+ Container corewebforms-orders-1 Stopped 
+PASS stopped Orders
+PASS dashboard degrades with Orders down
+PASS Orders API unreachable while stopped
+ Container corewebforms-postgres-1 Waiting 
+ Container corewebforms-postgres-1 Healthy 
+ Container corewebforms-orders-migrator-1 Starting 
+ Container corewebforms-orders-migrator-1 Started 
+ Container corewebforms-orders-migrator-1 Waiting 
+ Container corewebforms-postgres-1 Waiting 
+ Container corewebforms-postgres-1 Healthy 
+ Container corewebforms-orders-migrator-1 Exited 
+ Container corewebforms-orders-1 Starting 
+ Container corewebforms-orders-1 Started 
+PASS Frontend recovers after Orders restart
+ Container corewebforms-frontend2-1 Stopping 
+ Container corewebforms-frontend2-1 Stopped 
+PASS killing one backend shifts traffic to the survivor (200s, survivor only)
+ Container corewebforms-postgres-1 Waiting 
+ Container corewebforms-postgres-1 Waiting 
+ Container corewebforms-postgres-1 Healthy 
+ Container corewebforms-postgres-1 Healthy 
+ Container corewebforms-orders-migrator-1 Starting 
+ Container corewebforms-catalog-migrator-1 Starting 
+ Container corewebforms-orders-migrator-1 Started 
+ Container corewebforms-orders-migrator-1 Waiting 
+ Container corewebforms-postgres-1 Waiting 
+ Container corewebforms-catalog-migrator-1 Started 
+ Container corewebforms-postgres-1 Waiting 
+ Container corewebforms-catalog-migrator-1 Waiting 
+ Container corewebforms-postgres-1 Healthy 
+ Container corewebforms-postgres-1 Healthy 
+ Container corewebforms-orders-migrator-1 Exited 
+ Container corewebforms-catalog-migrator-1 Exited 
+ Container corewebforms-orders-1 Waiting 
+ Container corewebforms-redis-1 Waiting 
+ Container corewebforms-catalog-1 Waiting 
+ Container corewebforms-redis-1 Healthy 
+ Container corewebforms-orders-1 Healthy 
+ Container corewebforms-catalog-1 Healthy 
+ Container corewebforms-frontend2-1 Starting 
+ Container corewebforms-frontend2-1 Started 
+PASS restarted backend rejoins rotation
+test-failures: all checks passed

@@ -1,0 +1,13 @@
+PASS catalog starts at 2 replicas
+PASS orders starts at 2 replicas
+PASS frontend starts at 2 replicas
+  starting load ramp (orders-write 16 VUs + dashboard 8 VUs, 150s)
+  peak replicas during ramp: catalog=2 orders=4 frontend=4
+PASS orders or catalog scaled up (>= 3)
+PASS scaled-up pods served traffic (4: frontend-6b7d446498-9xmj8(46 reqs), frontend-6b7d446498-l5pbh(46 reqs), orders-5b7c8df4-bwsw6(4144 reqs), orders-5b7c8df4-j5w59(5189 reqs))
+  waiting for scale-down (60s stabilization + 1 pod/30s policy)
+PASS all services back at <= 2 replicas after load drop
+PASS catalog has 2 ready replicas at the end
+PASS orders has 2 ready replicas at the end
+PASS frontend has 2 ready replicas at the end
+hpa-demo: all checks passed

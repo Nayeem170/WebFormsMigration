@@ -1,0 +1,15 @@
+PASS default-deny and allow policies exist (7 total)
+PASS in-cluster DNS resolves (getent postgres from frontend)
+PASS pod IPs resolved for by-IP probes
+PASS positive control: frontend -> catalog:8094 by name OPEN (0.1s)
+PASS positive control: catalog -> postgres:5432 by name OPEN (0.1s)
+PASS gateway -> postgres:5432 DENIED by policy (hang, not refuse: rc=124 5.1s)
+PASS gateway -> postgres by pod IP DENIED (DNS taken out of the path)
+PASS frontend -> keycloak:8080 DENIED by policy (IdP unreachable pod-to-pod)
+PASS frontend -> keycloak by pod IP DENIED
+PASS unlabeled pod -> catalog:8094 by IP DENIED (default-deny)
+PASS same probe from frontend OPEN (policy scoping proven, not just dropped)
+PASS all deployments still fully ready 90s under the policies
+PASS no container restarted under the policies (probes unaffected)
+PASS gateway still serves on its public listener
+test-netpol: all checks passed

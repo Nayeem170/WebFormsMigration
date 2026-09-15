@@ -1,0 +1,5 @@
+N=8    successes=8    other=[-           ] stock=0    invariant=PASS goal=PASS instances=2 wall=2160ms
+N=64   successes=64   other=[-           ] stock=0    invariant=PASS goal=PASS instances=2 wall=2668ms
+N=128  successes=128  other=[-           ] stock=0    invariant=PASS goal=PASS instances=2 wall=3026ms
+N=256  successes=256  other=[-           ] stock=0    invariant=PASS goal=PASS instances=2 wall=4033ms
+wrote artifacts\phase5\concurrent-reserve-2x.md
