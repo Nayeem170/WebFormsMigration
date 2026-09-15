@@ -7,7 +7,11 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$kind = 'C:\Users\nayee\.config\kilo\bin\kind.exe'
+# Resolve kind from PATH first so the script works on any machine/CI runner;
+# fall back to this machine's kilo-managed install.
+$kindCommand = Get-Command kind -ErrorAction SilentlyContinue
+$kind = if ($kindCommand) { $kindCommand.Source } else { 'C:\Users\nayee\.config\kilo\bin\kind.exe' }
+if (-not (Test-Path $kind)) { throw "kind not found: install it on PATH or at $kind" }
 
 $m = Select-String -Path (Join-Path $root 'compose.yaml') -Pattern 'POSTGRES_PASSWORD:\s*(\S+)'
 $pgPassword = $m.Matches[0].Groups[1].Value
@@ -23,7 +27,7 @@ $clusters = & $kind get clusters 2>$null
 if (-not ($clusters -match $ClusterName)) {
     & $kind create cluster --name $ClusterName --config (Join-Path $PSScriptRoot 'kind-config.yaml') 2>&1 | Select-Object -Last 2
 }
-& $kind export kubeconfig --name $ClusterName --kubeconfig "$env:USERPROFILE\.kube\config" 2>&1 | Out-Null
+& $kind export kubeconfig --name $ClusterName --kubeconfig (Join-Path $HOME '.kube/config') 2>&1 | Out-Null
 kubectl config use-context "kind-$ClusterName" | Out-Null
 
 # CNI: kindnet is disabled (kind-config.yaml) because it does not enforce
@@ -59,8 +63,8 @@ if ($LASTEXITCODE -ne 0) { throw 'metrics-server did not become ready' }
 # Gateway TLS cert: created from the local dev cert (infra/make-cert.ps1);
 # the password rides in the same secret. Local-only credentials like every
 # other secret in this script.
-$certPath = Join-Path $root 'infra\certs\gateway.pfx'
-if (-not (Test-Path $certPath)) { throw "gateway cert missing: run infra\make-cert.ps1 first" }
+$certPath = Join-Path $root 'infra/certs/gateway.pfx'
+if (-not (Test-Path $certPath)) { throw "gateway cert missing: run infra/make-cert.ps1 first" }
 kubectl -n corewebforms delete secret gateway-tls --ignore-not-found | Out-Null
 kubectl -n corewebforms create secret generic gateway-tls `
     --from-file=gateway.pfx=$certPath --from-literal='password=localdev-cert' | Out-Null
