@@ -13,3 +13,6 @@ WebFormsSample/
 artifacts/
 App_Data/*.db-*
 **/App_Data/
+
+infra/certs/
+
