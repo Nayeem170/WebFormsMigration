@@ -1409,6 +1409,124 @@ Phase 7 execution record (2026-09-15, part 1 - loopback-bound):
   as the last commit, gated on the auth suite above; (3) optionally the
   interactive browser login walkthrough (hosts entry + cookie flow).
 
+Phase 7 execution record (2026-09-15, part 2 - roles, Calico, routed IdP):
+
+- Role narrowing finished: ccw_app is USAGE-only on schema public in both
+  databases (ccw_migrator keeps CREATE). The split is ASSERTED, not
+  assumed: test-auth connects as ccw_app and requires CREATE TABLE to
+  fail with 'permission denied' (any other failure - bad password, wrong
+  database - does not count), and the identical statement as ccw_migrator
+  must succeed: the negative check carries its own positive control. The
+  live volumes were REVOKE'd to match the file; the Calico rebuild then
+  exercised the new init.sql end-to-end (fresh empty database,
+  initContainer migrations as ccw_migrator, apps as ccw_app).
+- Calico cluster: kind-config.yaml sets disableDefaultCNI + podSubnet
+  192.168.0.0/16 (matching CALICO_IPV4POOL_CIDR in the pinned, patched
+  manifest); IP_AUTODETECTION_METHOD=interface=eth0 so calico-node never
+  picks a cali veth as the node IP. apply.ps1 installs Calico BEFORE
+  anything else and waits nodes-Ready explicitly (every node sits
+  NotReady until the daemonset lands; the first apply raced this and was
+  killed mid-image-load). metrics-server moved from a Phase 6 manual step
+  into apply.ps1 as a pinned patched manifest (--kubelet-insecure-tls).
+- apply.ps1 ordering bug found on the fresh cluster: gateway-tls and
+  keycloak-realm were created BEFORE 00-namespace.yaml. On the old
+  cluster the namespace pre-existed, so the creates only ever worked by
+  accident; fresh cluster = silent create failures into Out-Null and
+  gateway/keycloak pods stuck FailedMount. Namespace now applies first
+  and the creates check $LASTEXITCODE.
+- NetworkPolicy (15-netpol.yaml): INGRESS-ONLY default deny. Egress stays
+  open deliberately: Phase 6 retired client-side pools for Service DNS,
+  and a default-deny egress without a kube-dns allow takes down the whole
+  stack at once - the property that matters is who can REACH the
+  unauthenticated services. Allows: gateway->frontend 8081;
+  gateway/frontend/orders->catalog 8094; gateway/frontend->orders 8095;
+  catalog/orders->postgres 5432 (frontend has no database and must not
+  reach one); frontend->redis 6379; gateway->keycloak 8080 (and NOTHING
+  else - Keycloak's admin console pod-to-pod would be a full realm
+  takeover). The gateway accepts nothing in-cluster at all; external
+  traffic arrives via the host path. 8090 (management) is in no allow,
+  so it is pod-to-pod closed and node-only reachable (probes, exec).
+- test-netpol.ps1 (14 checks, all passing) is built around the inversion
+  of every vacuous pass this engagement has found: a denied probe must
+  HANG (bash /dev/tcp under timeout: rc=124, ~5.1s), while
+  connection-refused and DNS failure both fail fast and mean the policy
+  was never consulted - those FAIL the check. Every denied target is
+  probed by pod IP as well as by name so DNS cannot masquerade as
+  enforcement; DNS itself is verified first (getent from frontend). The
+  unknown-pod check runs the IDENTICAL command from frontend's pod in
+  the same breath: denied for the unlabeled pod, OPEN for frontend -
+  policy scoping proven, not just dropped. Probe survival is verified,
+  not assumed (Calico without HostEndpoints does not police node-to-pod
+  traffic): 90s under the policies, all deployments fully ready, zero
+  restarts, gateway still serving. kubectl run on a :latest local image
+  defaults imagePullPolicy=Always - the netprobe pod needs --overrides
+  to pin IfNotPresent or it ErrImagePulls against a registry that does
+  not have it.
+- Routed IdP - the bind blocker, resolved while loopback-bound. Keycloak
+  is now BEHIND the gateway (YARP routes /realms, /js, /resources at
+  Order 0): exactly one exposed port, before and after the bind.
+  KC_HOSTNAME pins the EXTERNAL https issuer and
+  KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true splits the discovery document:
+  issuer + authorization_endpoint are the routed https URL the browser
+  follows, token_endpoint + jwks_uri stay http://keycloak:8080 so the
+  gateway's backchannel never leaves the isolated network (verified by
+  fetching discovery from inside the gateway container). The gateway
+  keeps Authority=internal for metadata and overrides
+  TokenValidationParameters.ValidIssuers with the external issuer
+  (Oidc__Issuer) - no self-loop through the published port, no
+  self-signed-cert backchannel validation. The write gate EXEMPTS the
+  IdP surface: token and login-action endpoints are unauthenticated
+  POSTs by OIDC design and enforce their own auth; the rate limiter
+  still covers them.
+- The browser path is now proven end-to-end while loopback-bound, on BOTH
+  topologies, by a scripted login in test-auth (the check that gates the
+  bind): unauthenticated POST -> 302 to the ROUTED authorize endpoint ->
+  Keycloak login form (served through the gateway) -> credential POST to
+  login-actions -> form_post code page -> POST code+state to
+  /signin-oidc with the correlation+nonce cookies riding the whole walk
+  -> ccw.session issued. The password grant also goes through the routed
+  token endpoint now (backchannel-style clients served by the same
+  path). Compose pins https://127.0.0.1:8443; k8s pins
+  https://127.0.0.1:18443 (the TLS port-forward; compose owns 8443).
+- THE COOKIE BUG worth recording: replacing the OIDC CorrelationCookie/
+  NonceCookie builders with fresh CookieBuilders (to set Secure) drops
+  their Name prefixes, and ReadNonceCookie matches cookies BY that
+  prefix ('.AspNetCore.OpenIdConnect.Nonce.'): the write side emits
+  prefix-less '<protected-blob>=N' cookies the read side can never find,
+  and every login 500s with IDX21323 (nonce null). Found by reading the
+  .NET 9 handler source after curl, a raw-header dump, and a manual
+  cookie replay all looked 'fine'. Fix: MUTATE the default builders -
+  OAuth/OIDC defaults already carry SameSite=None (required for
+  form_post); only SecurePolicy/HttpOnly needed setting. Three
+  script-side lessons in the same chase: Keycloak's form_post page uses
+  UPPERCASE attributes (regexes need (?i)); the browser-flow check must
+  run BEFORE the rate-limit bursts (they saturate the loopback socket
+  and the 302 becomes a 429); and a fresh stack's first Redis-down
+  request can sit in TCP retry for minutes - rerun warm before
+  diagnosing.
+- check-exposure.ps1 rewritten as a WHITELIST, not deleted (the failure
+  mode of a gate opening is the assertion quietly relaxing to nothing):
+  an expected host-published set per service (gateway 8080/8443,
+  postgres 15432, redis 16379, keycloak 18081, plus the overlay's
+  18094/18095), any port outside the set FAILS (catches a debug publish
+  left behind), and the ONLY port ever allowed non-loopback is gateway
+  8443 - and only with -OpenedGate. Plain-HTTP 8080 stays loopback even
+  after the bind: the exposed surface is TLS-only.
+- Cert: make-cert.ps1 now writes SANs localhost + 127.0.0.1 and takes
+  -ExtraDnsName for the real hostname(s) at bind time (a missing SAN
+  makes browsers reject the cert before OIDC ever runs). The gateway
+  runs no HSTS (no UseHsts): nothing to unwind if the hostname is
+  reused, deliberate while the cert is self-signed.
+- Verification state at these commits: compose auth 15/15 (incl. routed
+  browser login), suite 40/40, smoke 11/11, exposure whitelist all-pass
+  (base shape); k8s auth 15/15, netpol 14/14, battery 27/27, exposure
+  5/5. The bind itself remains NOT applied and is now fully unblocked:
+  regenerate the cert with the real hostname, swap KC_HOSTNAME /
+  Oidc__Issuer / realm redirectUris to https://<host>:8443, publish 8443
+  on the real interface, and re-run everything with
+  check-exposure -OpenedGate. For k8s the same swap lands on the
+  port-forward address (or kind extraPortMappings on the next rebuild).
+
 ### Phase 8 - Observability
 
 Goal: see which instance did what, and know before users do.
