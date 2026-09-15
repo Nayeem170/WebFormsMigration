@@ -187,14 +187,16 @@ app.Use(async (context, next) =>
 // authenticated user. Browsers get a 302 to the IdP, API callers a 401.
 // The routed IdP surface is exempt: its token and login-action endpoints
 // are unauthenticated POSTs BY OIDC DESIGN and enforce their own auth. The
-// rate limiter still covers them (it runs before this gate).
+// exemption names the corewebforms realm, not /realms as a whole, so the
+// master realm can never be POSTed to through this edge even if the route
+// above is ever widened again. The rate limiter still covers all of it.
 if (!string.IsNullOrEmpty(authority))
 {
     app.UseAuthentication();
     app.Use(async (context, next) =>
     {
         var path = context.Request.Path;
-        var isIdpSurface = path.StartsWithSegments("/realms")
+        var isIdpSurface = path.StartsWithSegments("/realms/corewebforms")
             || path.StartsWithSegments("/js")
             || path.StartsWithSegments("/resources");
         var method = context.Request.Method;

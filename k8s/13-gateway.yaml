@@ -42,7 +42,7 @@ data:
             "ClusterId": "keycloak",
             "Order": 0,
             "Match": {
-              "Path": "/realms/{**catch-all}"
+              "Path": "/realms/corewebforms/{**catch-all}"
             }
           },
           "keycloak-js": {
