@@ -1,0 +1,12 @@
+# kind cluster config. networking.disableDefaultCNI is the whole point of
+# Phase 7's reference topology: kindnet does NOT enforce NetworkPolicy, so
+# a default-deny applied on it passes vacuously. Calico (pinned manifest
+# at infra/calico/calico.yaml) is installed by k8s/apply.ps1 immediately
+# after cluster creation; nodes sit NotReady until the daemonset lands,
+# which apply.ps1 waits out explicitly before applying the stack.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  disableDefaultCNI: true
+  # Must match CALICO_IPV4POOL_CIDR in the patched calico.yaml.
+  podSubnet: 192.168.0.0/16

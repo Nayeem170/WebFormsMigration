@@ -1,0 +1,144 @@
+# Phase 7 network policy. The services are unauthenticated BY DESIGN; this
+# is the enforcement. Ingress-only default deny (egress stays open) so
+# CoreDNS lookups keep working - Phase 6 retired client-side pools in favor
+# of Service DNS, and an egress deny would take down the whole stack at
+# once unless kube-dns were allow-listed first.
+#
+# Calico (installed by apply.ps1; kindnet does not enforce policy). With no
+# HostEndpoints configured, Calico does not police node-to-pod traffic, so
+# kubelet probes and kubectl port-forward/exec keep working unchanged -
+# verified by test-netpol.ps1 rather than assumed.
+#
+# Consequence worth stating: pod-to-pod the ONLY reachable surfaces are the
+# allows below. The gateway accepts nothing from inside the cluster (all
+# external traffic arrives via the host path); Keycloak's admin console,
+# Postgres, and Redis are unreachable from any pod that is not an explicit
+# caller. 8090 (management) is not in any allow, so it is pod-to-pod closed
+# and only reachable from the node (probes, exec).
+---
+# Default deny: everything not explicitly allowed below is dropped.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: corewebforms
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-frontend
+  namespace: corewebforms
+spec:
+  podSelector:
+    matchLabels: { app: frontend }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: gateway }
+      ports:
+        - protocol: TCP
+          port: 8081
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-catalog
+  namespace: corewebforms
+spec:
+  podSelector:
+    matchLabels: { app: catalog }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: gateway }
+        - podSelector:
+            matchLabels: { app: frontend }
+        - podSelector:
+            matchLabels: { app: orders }
+      ports:
+        - protocol: TCP
+          port: 8094
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-orders
+  namespace: corewebforms
+spec:
+  podSelector:
+    matchLabels: { app: orders }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: gateway }
+        - podSelector:
+            matchLabels: { app: frontend }
+      ports:
+        - protocol: TCP
+          port: 8095
+---
+# Postgres: catalog and orders only (they run the initContainer migrations
+# as ccw_migrator in-pod). Frontend has no database and must not be able to
+# reach one.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-postgres
+  namespace: corewebforms
+spec:
+  podSelector:
+    matchLabels: { app: postgres }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: catalog }
+        - podSelector:
+            matchLabels: { app: orders }
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# Redis: frontend session state only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-redis
+  namespace: corewebforms
+spec:
+  podSelector:
+    matchLabels: { app: redis }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: frontend }
+      ports:
+        - protocol: TCP
+          port: 6379
+---
+# Keycloak: the gateway only. Nothing else in the cluster may talk to the
+# IdP - its admin console (admin/localdev) from any pod would be a full
+# realm takeover.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-keycloak
+  namespace: corewebforms
+spec:
+  podSelector:
+    matchLabels: { app: keycloak }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: gateway }
+      ports:
+        - protocol: TCP
+          port: 8080
