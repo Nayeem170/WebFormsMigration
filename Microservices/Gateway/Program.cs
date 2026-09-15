@@ -24,7 +24,15 @@ builder.Services.AddReverseProxy()
 
 // Phase 7 edge security. The services stay unauthenticated BY DESIGN; the
 // network boundary is the enforcement for them (NetworkPolicy in k8s).
+// The IdP is ROUTED through this gateway (/realms, /js, /resources), so
+// there is exactly one exposed surface. Authority stays the INTERNAL
+// Keycloak URL (metadata + backchannel stay on the isolated network);
+// Issuer is the EXTERNAL https URL the browser sees (KC_HOSTNAME). With
+// backchannel-dynamic on, the metadata document carries internal
+// backchannel endpoints and external browser endpoints, so no self-loop
+// and no self-signed-cert validation on the handler's backchannel.
 var authority = builder.Configuration["Oidc:Authority"];
+var issuer = builder.Configuration["Oidc:Issuer"];
 var audience = builder.Configuration["Oidc:Audience"] ?? "gateway";
 if (!string.IsNullOrEmpty(authority))
 {
@@ -52,6 +60,7 @@ if (!string.IsNullOrEmpty(authority))
         // deviation recorded in the Phase 7 decisions.
         o.RequireHttpsMetadata = false;
         o.TokenValidationParameters.ValidAudiences = new[] { audience };
+        if (!string.IsNullOrEmpty(issuer)) o.TokenValidationParameters.ValidIssuers = new[] { issuer };
         o.TokenValidationParameters.NameClaimType = "preferred_username";
     })
     .AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, o =>
@@ -80,13 +89,21 @@ if (!string.IsNullOrEmpty(authority))
         o.GetClaimsFromUserInfoEndpoint = false;
         o.TokenValidationParameters.NameClaimType = "preferred_username";
         o.TokenValidationParameters.ValidAudiences = new[] { audience };
+        if (!string.IsNullOrEmpty(issuer)) o.TokenValidationParameters.ValidIssuers = new[] { issuer };
         // form_post callbacks break without SameSite=None; Secure on the
         // correlation and nonce cookies. Works on loopback, fails on the
-        // first real hostname if forgotten.
-        o.CorrelationCookie = new CookieBuilder
-        { SameSite = SameSiteMode.None, SecurePolicy = CookieSecurePolicy.Always, HttpOnly = true };
-        o.NonceCookie = new CookieBuilder
-        { SameSite = SameSiteMode.None, SecurePolicy = CookieSecurePolicy.Always, HttpOnly = true };
+        // first real hostname if forgotten. MUTATE the default builders -
+        // replacing them with fresh CookieBuilders drops their Name
+        // prefixes (.AspNetCore.OpenIdConnect.Nonce. /
+        // .AspNetCore.Correlation.), and ReadNonceCookie matches cookies
+        // BY that prefix: the write side would emit prefix-less cookies
+        // the read side can never find, and every login 500s with
+        // IDX21323. Found the hard way; verified against the .NET 9
+        // handler source.
+        o.CorrelationCookie.SecurePolicy = CookieSecurePolicy.Always;
+        o.CorrelationCookie.HttpOnly = true;
+        o.NonceCookie.SecurePolicy = CookieSecurePolicy.Always;
+        o.NonceCookie.HttpOnly = true;
     });
     builder.Services.AddAuthorization();
 }
@@ -168,16 +185,23 @@ app.Use(async (context, next) =>
 // The write gate: reads public, writes authenticated. WebForms postbacks
 // are POSTs to the .aspx pages; any non-GET/HEAD/OPTIONS requires an
 // authenticated user. Browsers get a 302 to the IdP, API callers a 401.
+// The routed IdP surface is exempt: its token and login-action endpoints
+// are unauthenticated POSTs BY OIDC DESIGN and enforce their own auth. The
+// rate limiter still covers them (it runs before this gate).
 if (!string.IsNullOrEmpty(authority))
 {
     app.UseAuthentication();
     app.Use(async (context, next) =>
     {
+        var path = context.Request.Path;
+        var isIdpSurface = path.StartsWithSegments("/realms")
+            || path.StartsWithSegments("/js")
+            || path.StartsWithSegments("/resources");
         var method = context.Request.Method;
         var isWrite = !(method.Equals("GET", StringComparison.OrdinalIgnoreCase)
             || method.Equals("HEAD", StringComparison.OrdinalIgnoreCase)
             || method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase));
-        if (isWrite && (context.User.Identity?.IsAuthenticated != true))
+        if (isWrite && !isIdpSurface && (context.User.Identity?.IsAuthenticated != true))
         {
             if (context.Request.Headers.Accept.ToString().Contains("text/html"))
             {
