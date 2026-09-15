@@ -3,6 +3,7 @@ name: corewebforms
 services:
   postgres:
     image: postgres:17-alpine
+    command: ["postgres", "-c", "max_connections=200"]
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: localdev
@@ -61,9 +62,10 @@ services:
     environment:
       Urls: http://0.0.0.0:8094
       Database__Provider: postgres
-      # MaxPoolSize=20: 4 app processes x 20 = 80 connections, headroom of 20
-      # under Postgres max_connections=100 for migrators and psql. The Npgsql
-      # default (100 per process) would let 4 pools exhaust the server alone.
+      # MaxPoolSize=20: admission control per process (bounds concurrent
+      # transactions queuing on a row). max_connections=200 leaves a budget
+      # of 180 for apps; the k8s Phase 6 arithmetic is recorded in the plan:
+      # (4 catalog + 4 orders HPA max) x 20 = 160 <= 180.
       Database__ConnectionString: Host=postgres;Port=5432;Database=ccw_catalog;Username=ccw_app;Password=localdev;MaxPoolSize=20
       Database__Migrate: "false"
     depends_on:
