@@ -2,7 +2,10 @@ name: corewebforms
 
 services:
   postgres:
-    image: postgres:17-alpine
+    # ECR public mirror of the Docker Hub library image: GH-hosted runners
+    # share a Docker Hub IP pool and hit unauthenticated pull limits - the
+    # classic nightly flake. Mirror is public, no auth, no limits.
+    image: public.ecr.aws/docker/library/postgres:17-alpine
     command: ["postgres", "-c", "max_connections=200"]
     environment:
       POSTGRES_USER: postgres
@@ -18,9 +21,10 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
+      start_period: 30s
 
   redis:
-    image: redis:7-alpine
+    image: public.ecr.aws/docker/library/redis:7-alpine
     ports:
       - "127.0.0.1:16379:6379"
     healthcheck:
@@ -78,7 +82,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 10s
+      start_period: 30s
 
   catalog2:
     <<: *catalog-service
@@ -103,7 +107,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 10s
+      start_period: 30s
 
   orders2:
     <<: *orders-service
@@ -130,7 +134,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 30
-      start_period: 15s
+      # Generous on purpose: 4-vCPU CI runners boot all 10 services at once
+      # and the cold window is long. Raise the grace, never loosen the check.
+      start_period: 60s
 
   frontend2:
     <<: *frontend-service
@@ -164,7 +170,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 5s
+      start_period: 15s
 
 volumes:
   postgres-data:

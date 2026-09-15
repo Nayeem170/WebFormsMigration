@@ -1649,6 +1649,15 @@ Phase 7 execution record (2026-09-15, part 3 - realm and edge hardening):
   `docs/evidence/phase7/` (final no-auth smoke + subresource rounds,
   failures suite, k8s/netpol runs, and the pre-removal test-auth runs
   the record above cites).
+- Open item, decision recorded (post-part-4 review): key-ring skew
+  ships with restart-the-stale-replica as the accepted remedy for this
+  demo. That is an ops action, not a fix - the late replica still
+  validates only its own fresh keys until restarted, and the smoke
+  rounds catch it only after the fact. Phase 8 owns the real answer:
+  expose per-replica key-ring state (key count, active key id) as a
+  metric so skew is visible before a browser finds it; the fix itself
+  (ring prewarm on boot vs restart-as-remedy with the metric as
+  trigger) is decided there, on evidence.
 
 ### Phase 8 - Observability
 
