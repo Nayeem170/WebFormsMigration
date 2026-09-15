@@ -1596,6 +1596,56 @@ Phase 7 execution record (2026-09-15, part 3 - realm and edge hardening):
   lockout); k8s test-auth 17/17, netpol 14/14, exposure all-pass; both
   stacks loopback-bound. The bind demonstration itself still awaits the
   real hostname and a second machine.
+- Bind demonstration EXECUTED and CLOSED (host 192.168.0.40, second
+  machine on the LAN): routed login walked by a real off-host browser,
+  exposure -OpenedGate all-pass, then 8443 returned to loopback. The
+  demonstration surfaced two real defects every suite had missed, both
+  invisible to status-code checks from the host:
+  1. DataProtection key-ring skew on cold start. The frontends share the
+     ring through Redis, and a replica that comes up late (or was
+     recreated after keys rotated) validates only its own fresh tokens
+     while the other replica's mint 404s - page from one replica,
+     subresources from the other, dead postbacks in a real browser.
+     Hot fix is a restart of the stale replica (ring reload); the guard
+     is smoke-parity minting and fetching a __webforms/resource token
+     through the edge four times so round-robin crosses replicas and a
+     stale ring fails the suite instead of a browser.
+  2. The frontend image never published Pages/** css/js (the csproj
+     copied only Content and Scripts). Every demo page lost its
+     page-specific stylesheet in containers while source runs looked
+     fine; the missing files 404'd so consistently they read as
+     cosmetic. Found by the unstyled wizard in the off-host browser.
+     Fix: publish Pages/**/*.{css,js}.
+- Probe-artifact lesson from the same demonstration: a "gateway mints
+  poisoned tokens" investigation was manufactured by the probe itself -
+  the extraction regex excluded only single quotes, swallowed following
+  markup into the token, and the HTTP client percent-encoded it into a
+  guaranteed 404. The host/container split tracked the script language
+  (bash grep clean, PowerShell regex broken), not the network path.
+  Recorded because it is the misleading-verifier shape again: a broken
+  check that fails exactly where you are looking fabricates evidence.
+  Clean-extraction probes plus the deterministic key-ring repro settled
+  it.
+- check-exposure fixes: the nested @(@('svc',port)) pair list flattened
+  in PowerShell and silently matched nothing (now a 'svc/port' hashtable);
+  the whitelist now covers the test-ports overlay's replica ports
+  (18096/18097) so the check is valid in both shapes.
+- AUTH REMOVED by owner decision - the demo runs unauthenticated end to
+  end. Removed: the gateway write gate and OIDC/JwtBearer/cookie
+  handlers, the compose keycloak service, k8s keycloak objects and
+  allow-to-keycloak policy, the realm json, and test-auth.ps1. Kept:
+  TLS termination, the management-port health guard, rate limiting, and
+  forwarded-header hygiene - none of them depend on auth. The full IdP
+  design and its lessons (one-URL issuer split, backchannel-dynamic,
+  PKCE A/B, per-account lockout) live in git history at b17ea0e /
+  ca3255a / 5b88052 for the day auth returns; the production guidance
+  above applies unchanged then.
+- Verification at part 4 commits: smoke-parity 15/15 on the no-auth
+  compose stack (incl. the four cross-replica resource rounds);
+  unauthenticated GET /, page css, and a postback POST all 200 through
+  the gateway; IdP route 404; keycloak container absent; 8443
+  loopback-only again; exposure all-pass; netpol policy-count
+  expectation adjusted for the removed policy.
 
 ### Phase 8 - Observability
 
