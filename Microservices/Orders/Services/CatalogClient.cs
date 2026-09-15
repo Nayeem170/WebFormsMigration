@@ -19,12 +19,21 @@ namespace Orders{
     public static class CatalogClient
     {
         private const int MaxAttempts = 3;
+        private static readonly TimeSpan PooledConnectionLifetime = ReadPoolLifetime();
         private static readonly HttpClient _client = new HttpClient(
-            new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) }, disposeHandler: true)
+            new SocketsHttpHandler { PooledConnectionLifetime = PooledConnectionLifetime }, disposeHandler: true)
         {
             Timeout = TimeSpan.FromSeconds(3)
         };
         private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
+
+        private static TimeSpan ReadPoolLifetime()
+        {
+            var raw = Environment.GetEnvironmentVariable("Http__PooledConnectionLifetimeSeconds");
+            return double.TryParse(raw, out var seconds) && seconds > 0
+                ? TimeSpan.FromSeconds(seconds)
+                : TimeSpan.FromMinutes(2);
+        }
 
         public static void Reserve(ServiceEndpointPool pool, ReserveStockRequest request, string? correlationId = null)
             => SendStockCall(pool, "/api/products/reserve", request, correlationId);

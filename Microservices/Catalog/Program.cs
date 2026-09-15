@@ -8,7 +8,8 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
-var builder = WebApplication.CreateBuilder(args);
+    var builder = WebApplication.CreateBuilder(args);
+    builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(25));
 
 var urls = builder.Configuration["Urls"] ?? "http://localhost:8094";
 builder.WebHost.UseUrls(urls);
@@ -113,6 +114,23 @@ if (migrateOnStartup)
 }
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/health/live", () => Results.Ok(new { status = "alive" }));
+app.MapGet("/health/ready", async (AppDbContext db) =>
+{
+    // Real SQL, not CanConnectAsync: CanConnect can borrow a warm pooled
+    // connection and validate nothing on the wire, so a silently dead
+    // connection (blackholed TCP) looks ready for minutes. SELECT 1 forces
+    // bytes onto the socket, so readiness flips on real connection loss.
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync("SELECT 1");
+        return Results.Ok(new { status = "ready" });
+    }
+    catch
+    {
+        return Results.Problem(statusCode: 503, title: "database unreachable");
+    }
+});
 
 app.MapGet("/api/products", (AppDbContext db, bool includeDeleted = false) =>
 {

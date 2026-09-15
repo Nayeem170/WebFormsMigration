@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Inventory.Contracts;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(25));
 
 var urls = builder.Configuration["Urls"] ?? "http://localhost:8080";
 builder.WebHost.UseUrls(urls);

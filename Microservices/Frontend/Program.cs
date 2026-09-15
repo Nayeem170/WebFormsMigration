@@ -22,6 +22,7 @@ namespace CoreWebForms
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
+            builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(25));
 
             var urls = builder.Configuration["Urls"] ?? "http://localhost:8081";
             builder.WebHost.UseUrls(urls);

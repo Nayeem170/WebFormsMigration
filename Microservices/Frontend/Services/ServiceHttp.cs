@@ -9,11 +9,20 @@ namespace CoreWebForms.Services
     {
         internal static readonly TimeSpan CallTimeout = TimeSpan.FromSeconds(2);
 
+        internal static readonly TimeSpan PooledConnectionLifetime = ReadPoolLifetime();
         private static readonly HttpClient _client = new HttpClient(
-            new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) }, disposeHandler: true)
+            new SocketsHttpHandler { PooledConnectionLifetime = PooledConnectionLifetime }, disposeHandler: true)
         {
             Timeout = CallTimeout
         };
+
+        private static TimeSpan ReadPoolLifetime()
+        {
+            var raw = Environment.GetEnvironmentVariable("Http__PooledConnectionLifetimeSeconds");
+            return double.TryParse(raw, out var seconds) && seconds > 0
+                ? TimeSpan.FromSeconds(seconds)
+                : TimeSpan.FromMinutes(2);
+        }
 
         internal static HttpResponseMessage Send(Func<string, HttpRequestMessage> requestFactory, bool retryOnFailure, ServiceEndpointPool pool)
         {
