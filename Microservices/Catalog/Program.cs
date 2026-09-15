@@ -203,7 +203,7 @@ app.MapPost("/api/products/reserve", (ReserveStockRequest request, AppDbContext 
     if (db.ReservationKeys.Find(request.ReservationKey) != null)
         return Results.Ok(new { reserved = true, replayed = true });
 
-    var items = request.Items.OrderBy(i => i.ProductId).ToList();
+    var items = StockRules.OrderItemsForLock(request.Items);
     try
     {
         using var tx = db.Database.BeginTransaction();
@@ -224,11 +224,11 @@ app.MapPost("/api/products/reserve", (ReserveStockRequest request, AppDbContext 
         tx.Commit();
         return Results.Ok(new { reserved = true, replayed = false });
     }
-    catch (DbUpdateException ex) when (IsUniqueViolation(ex, "ReservationKeys"))
+    catch (DbUpdateException ex) when (StockRules.IsUniqueViolation(ex, "ReservationKeys"))
     {
         return Results.Ok(new { reserved = true, replayed = true });
     }
-    catch (Exception ex) when (IsTransientLock(ex))
+    catch (Exception ex) when (StockRules.IsTransientLock(ex))
     {
         return TransientLockError();
     }
@@ -242,7 +242,7 @@ app.MapPost("/api/products/release", (ReleaseStockRequest request, AppDbContext 
     if (db.ReleaseKeys.Find(request.ReleaseKey) != null)
         return Results.Ok(new { released = true, replayed = true });
 
-    var items = request.Items.OrderBy(i => i.ProductId).ToList();
+    var items = StockRules.OrderItemsForLock(request.Items);
     try
     {
         using var tx = db.Database.BeginTransaction();
@@ -260,11 +260,11 @@ app.MapPost("/api/products/release", (ReleaseStockRequest request, AppDbContext 
         tx.Commit();
         return Results.Ok(new { released = true, replayed = false });
     }
-    catch (DbUpdateException ex) when (IsUniqueViolation(ex, "ReleaseKeys"))
+    catch (DbUpdateException ex) when (StockRules.IsUniqueViolation(ex, "ReleaseKeys"))
     {
         return Results.Ok(new { released = true, replayed = true });
     }
-    catch (Exception ex) when (IsTransientLock(ex))
+    catch (Exception ex) when (StockRules.IsTransientLock(ex))
     {
         return TransientLockError();
     }
@@ -305,27 +305,13 @@ static IResult StockRuleError(string errorCode, string message)
 
     static Dictionary<int, Product> LoadProductsForUpdate(AppDbContext db, List<StockItemDto> items)
     {
-        var ids = items.Select(i => i.ProductId).Distinct().OrderBy(id => id).ToList();
+        var ids = StockRules.OrderedLockIds(items);
         if (!db.Database.IsNpgsql())
             return db.Products.Where(p => ids.Contains(p.Id)).ToDictionary(p => p.Id);
         var idList = string.Join(", ", ids.Select(id => id.ToString(CultureInfo.InvariantCulture)));
         return db.Products
-            .FromSqlRaw($"SELECT * FROM \"Products\" WHERE \"Id\" IN ({idList}) ORDER BY \"Id\" FOR UPDATE")
+        .FromSqlRaw($"SELECT * FROM \"Products\" WHERE \"Id\" IN ({idList}) ORDER BY \"Id\" FOR UPDATE")
             .ToDictionary(p => p.Id);
-    }
-
-    static bool IsUniqueViolation(DbUpdateException ex, string table) =>
-        ex.InnerException is PostgresException pg && pg.SqlState == "23505"
-        || ex.InnerException is SqliteException sqlite && sqlite.SqliteErrorCode == 19 && sqlite.Message.Contains(table);
-
-    static bool IsTransientLock(Exception ex)
-    {
-        for (var e = ex; e != null; e = e.InnerException)
-        {
-            if (e is PostgresException pg && pg.SqlState is "55P03" or "40P01" or "53300") return true;
-            if (e is SqliteException sql && sql.SqliteErrorCode == 5) return true;
-        }
-        return false;
     }
 
 static IResult TransientLockError()

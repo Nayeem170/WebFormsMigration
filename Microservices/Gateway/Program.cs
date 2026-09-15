@@ -56,7 +56,7 @@ app.Use(async (context, next) =>
     // Client-settable logged field: validate strictly (32 hex, the mint
     // format) or replace. Newline injection, forged correlation, and Phase 8
     // forged trace attributes all start with trusting this header.
-    var correlationId = incoming.Length == 32 && incoming.All(Uri.IsHexDigit)
+    var correlationId = CorrelationId.IsValid(incoming)
         ? incoming
         : Guid.NewGuid().ToString("N");
     context.Items[CorrelationHeader.Name] = correlationId;

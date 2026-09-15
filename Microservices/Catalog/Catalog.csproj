@@ -19,4 +19,8 @@
     <ProjectReference Include="..\Contracts\Contracts.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="CoreWebForms.UnitTests" />
+  </ItemGroup>
+
 </Project>
