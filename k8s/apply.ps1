@@ -31,16 +31,35 @@ foreach ($image in 'corewebforms-catalog', 'corewebforms-orders', 'corewebforms-
     if ($LASTEXITCODE -ne 0) { throw "kind load failed for $image" }
 }
 
+# Keycloak: pull if absent locally, then load. The realm ConfigMap is built
+# from the same file compose mounts (single source of truth).
+$keycloakPresent = docker images --format '{{.Repository}}:{{.Tag}}' | Where-Object { $_ -eq 'quay.io/keycloak/keycloak:26.2' }
+if (-not $keycloakPresent) { docker pull quay.io/keycloak/keycloak:26.2 | Out-Null }
+& $kind load docker-image quay.io/keycloak/keycloak:26.2 --name $ClusterName 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'kind load failed for keycloak' }
+
+# Gateway TLS cert: created from the local dev cert (infra/make-cert.ps1);
+# the password rides in the same secret. Local-only credentials like every
+# other secret in this script.
+$certPath = Join-Path $root 'infra\certs\gateway.pfx'
+if (-not (Test-Path $certPath)) { throw "gateway cert missing: run infra\make-cert.ps1 first" }
+kubectl -n corewebforms delete secret gateway-tls --ignore-not-found | Out-Null
+kubectl -n corewebforms create secret generic gateway-tls `
+    --from-file=gateway.pfx=$certPath --from-literal='password=localdev-cert' | Out-Null
+
+kubectl -n corewebforms delete configmap keycloak-realm --ignore-not-found | Out-Null
+kubectl -n corewebforms create configmap keycloak-realm --from-file=realm.json=infra/keycloak/corewebforms-realm.json | Out-Null
+
 kubectl apply -f k8s/00-namespace.yaml | Out-Null
 
 kubectl -n corewebforms delete secret corewebforms-postgres corewebforms-catalog-db corewebforms-orders-db --ignore-not-found | Out-Null
 kubectl -n corewebforms create secret generic corewebforms-postgres --from-literal=user=postgres --from-literal="password=$pgPassword" | Out-Null
 kubectl -n corewebforms create secret generic corewebforms-catalog-db `
     --from-literal="app=Host=postgres;Port=5432;Database=ccw_catalog;Username=ccw_app;Password=$pgPassword;MaxPoolSize=20" `
-    --from-literal="migrator=Host=postgres;Port=5432;Database=ccw_catalog;Username=postgres;Password=$pgPassword" | Out-Null
+    --from-literal="migrator=Host=postgres;Port=5432;Database=ccw_catalog;Username=ccw_migrator;Password=$pgPassword" | Out-Null
 kubectl -n corewebforms create secret generic corewebforms-orders-db `
     --from-literal="app=Host=postgres;Port=5432;Database=ccw_orders;Username=ccw_app;Password=$pgPassword;MaxPoolSize=20" `
-    --from-literal="migrator=Host=postgres;Port=5432;Database=ccw_orders;Username=postgres;Password=$pgPassword" | Out-Null
+    --from-literal="migrator=Host=postgres;Port=5432;Database=ccw_orders;Username=ccw_migrator;Password=$pgPassword" | Out-Null
 
 kubectl -n corewebforms delete configmap postgres-init --ignore-not-found | Out-Null
 kubectl -n corewebforms create configmap postgres-init --from-file=infra/postgres-init.sql | Out-Null

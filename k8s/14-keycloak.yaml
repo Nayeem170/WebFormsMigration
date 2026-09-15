@@ -1,0 +1,67 @@
+# The keycloak-realm ConfigMap is created from infra/keycloak/
+# corewebforms-realm.json by k8s/apply.ps1 (single source of truth for the
+# realm definition).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: corewebforms
+  labels: { app: keycloak }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: keycloak }
+  template:
+    metadata:
+      labels: { app: keycloak }
+    spec:
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.2
+          imagePullPolicy: IfNotPresent
+          args: ["start-dev", "--import-realm"]
+          env:
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              value: admin
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              value: localdev
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            # Pin the INTERNAL hostname so issuer, JWKS and the gateway's
+            # authority all agree (see compose.yaml for the rationale).
+            - name: KC_HOSTNAME
+              value: http://keycloak:8080
+          volumeMounts:
+            - name: realm
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+          ports:
+            - containerPort: 8080
+          startupProbe:
+            tcpSocket: { port: 8080 }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket: { port: 8080 }
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: 8080 }
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "1", memory: 1Gi }
+      volumes:
+        - name: realm
+          configMap: { name: keycloak-realm }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: corewebforms
+spec:
+  type: ClusterIP
+  selector: { app: keycloak }
+  ports:
+    - port: 8080
+      targetPort: 8080

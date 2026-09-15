@@ -64,22 +64,47 @@ spec:
           env:
             - name: Urls
               value: http://0.0.0.0:8080
+            # Phase 7: TLS termination + management port + edge auth.
+            # Kestrel ignores Urls once Kestrel__Endpoints__ entries exist.
+            - name: Kestrel__Endpoints__Http__Url
+              value: http://0.0.0.0:8080
+            - name: Kestrel__Endpoints__Https__Url
+              value: https://0.0.0.0:8443
+            - name: Kestrel__Endpoints__Https__Certificate__Path
+              value: /certs/gateway.pfx
+            - name: Kestrel__Endpoints__Https__Certificate__Password
+              valueFrom: { secretKeyRef: { name: gateway-tls, key: password } }
+            - name: Kestrel__Endpoints__Management__Url
+              value: http://0.0.0.0:8090
+            - name: Oidc__Authority
+              value: http://keycloak:8080/realms/corewebforms
+            - name: Oidc__ClientId
+              value: gateway
+            - name: Oidc__Audience
+              value: gateway
           volumeMounts:
             - name: config
               mountPath: /app/appsettings.Production.json
               subPath: appsettings.Production.json
               readOnly: true
+            - name: certs
+              mountPath: /certs
+              readOnly: true
           ports:
             - containerPort: 8080
+            - containerPort: 8443
+            - containerPort: 8090
+          # Probes hit the MANAGEMENT port: /health is unroutable from the
+          # public port by design (recon oracle).
           startupProbe:
-            httpGet: { path: /health/live, port: 8080 }
+            httpGet: { path: /health/live, port: 8090 }
             periodSeconds: 5
             failureThreshold: 12
           readinessProbe:
-            httpGet: { path: /health/live, port: 8080 }
+            httpGet: { path: /health/live, port: 8090 }
             periodSeconds: 5
           livenessProbe:
-            httpGet: { path: /health/live, port: 8080 }
+            httpGet: { path: /health/live, port: 8090 }
             periodSeconds: 10
           resources:
             requests: { cpu: 100m, memory: 128Mi }
@@ -87,6 +112,8 @@ spec:
       volumes:
         - name: config
           configMap: { name: gateway-config }
+        - name: certs
+          secret: { secretName: gateway-tls }
 ---
 apiVersion: v1
 kind: Service
@@ -97,5 +124,9 @@ spec:
   type: ClusterIP
   selector: { app: gateway }
   ports:
-    - port: 8080
+    - name: http
+      port: 8080
       targetPort: 8080
+    - name: https
+      port: 8443
+      targetPort: 8443
