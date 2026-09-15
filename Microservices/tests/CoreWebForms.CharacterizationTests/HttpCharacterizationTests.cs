@@ -14,7 +14,9 @@ namespace CoreWebForms.CharacterizationTests
 
         private static HttpClient CreateClient()
         {
-            var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            // 30s: cold stacks on shared CI runners JIT slowly; 10s cut it
+            // too close and reported as client timeouts, not server answers.
+            var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
             var catalog = Environment.GetEnvironmentVariable("CATALOG_BASE") ?? "http://localhost:8094";
             var orders = Environment.GetEnvironmentVariable("ORDERS_BASE") ?? "http://localhost:8095";
             try
@@ -127,28 +129,45 @@ namespace CoreWebForms.CharacterizationTests
             var product = await CreateProductAsync(stock: n, isActive: true);
             var id = (int)product["id"]!;
 
-            var statuses = await Task.WhenAll(Enumerable.Range(0, n).Select(async i =>
+            // Reserve is idempotent (reservationKey replay returns 200 with
+            // replayed=true), and a contended FOR UPDATE can answer 503
+            // "retry" by design - so a well-behaved client retries 503s.
+            // The invariant under test (no oversell, all units granted
+            // exactly once) is asserted on the FINAL statuses either way.
+            async Task<(int Status, string Body)> ReserveOnce(string key)
             {
                 var body = new JsonObject
                 {
-                    ["reservationKey"] = $"conc-{_run}-{i}",
+                    ["reservationKey"] = key,
                     ["items"] = new JsonArray
                     {
                         new JsonObject { ["productId"] = id, ["quantity"] = 1 }
                     }
                 };
-                var response = await Http.PostAsJsonAsync(CatalogBase + "/api/products/reserve", body);
-                return (int)response.StatusCode;
-            }));
+                for (var attempt = 0; ; attempt++)
+                {
+                    var response = await Http.PostAsJsonAsync(CatalogBase + "/api/products/reserve", body);
+                    if ((int)response.StatusCode == 200 || attempt >= 3) 
+                        return ((int)response.StatusCode, await response.Content.ReadAsStringAsync());
+                    if ((int)response.StatusCode != 503)
+                        return ((int)response.StatusCode, await response.Content.ReadAsStringAsync());
+                    await Task.Delay(500);
+                }
+            }
+
+            var results = await Task.WhenAll(Enumerable.Range(0, n).Select(i => ReserveOnce($"conc-{_run}-{i}")));
+            var statuses = results.Select(r => r.Status).ToArray();
+            var failures = results.Where(r => r.Status != 200)
+                .Select(r => $"{r.Status}: {r.Body}");
 
             var successes = statuses.Count(s => s == 200);
             var reloaded = await GetProductAsync(id);
             var stock = (int)reloaded!["stock"]!;
 
             Assert.True(stock >= 0, $"oversell: stock {stock} after {successes} successes");
-            Assert.InRange(successes, 0, n);
             Assert.Equal(n - successes, stock);
-            Assert.Equal(n, successes);
+            Assert.True(successes == n,
+                $"expected all {n} reserves to succeed, got {successes}; failures: [{string.Join(" | ", failures)}]");
         }
 
         public void Dispose()
