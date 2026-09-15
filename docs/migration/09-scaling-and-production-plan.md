@@ -1663,7 +1663,42 @@ Phase 7 execution record (2026-09-15, part 3 - realm and edge hardening):
 
 Goal: see which instance did what, and know before users do.
 
-Steps:
+#### Interlude: continuous integration (post-part-4 review)
+
+CI was the survey's #1 gap (every suite ran by hand); added before
+Phase 8 and brought to green. Two workflows, first green runs
+2026-09-15: ci (push tier) run 35007027692, nightly (kind tier) run
+35009587549.
+
+- Push tier: build slnx, 24-fact unit tier, compose up (base +
+  test-ports), 11-fact characterization tier direct to replicas,
+  smoke-parity, failure injection, compose exposure check. ~3 min.
+- Nightly tier: two-node kind via apply.ps1 (Calico, metrics-server,
+  HPA), test-k8s, test-netpol (14), k8s exposure. ~8 min.
+- First-run failures, each root-caused (no retries, no
+  continue-on-error): (1) make-cert.ps1 Linux path - CopyWithPrivateKey
+  throws when CreateSelfSigned already associated the key, fixed with a
+  HasPrivateKey branch; (2) buildx container driver bootstraps
+  moby/buildkit from Docker Hub - the exact flaky IP pool this was
+  supposed to avoid, dropped for plain compose build on dockerd's
+  integrated BuildKit (no layer cache yet; ~4 min cold builds are
+  fine); (3) apply.ps1's kubectl wait timed out but the step stayed
+  green (native exit codes are not pwsh errors) - every wait is now
+  checked and dumps describe/nodes/events on failure; (4) gateway pod
+  FailedScheduling on Insufficient cpu: 2900m of app requests vs
+  ~3000m schedulable on a single 4-vCPU-runner node - kind-config now
+  runs control-plane + one worker.
+- Pull-limit class eliminated at the source: postgres/redis moved to
+  the public ECR mirrors of the Docker library images (compose + k8s).
+- One characterization flake root-caused by evidence: 6/8 concurrent
+  reserves with exact stock accounting (no oversell) - the invariant
+  held and the two failures were transient-class. The assert now
+  prints per-request status+body, and the test retries 503s only
+  (reserve is idempotent by reservationKey replay); 500s are never
+  retried and never will be.
+
+#### Steps
+
 
 1. OpenTelemetry: traces and metrics from all three services plus the
    gateway, with `X-Correlation-ID` carried as the trace attribute so the
