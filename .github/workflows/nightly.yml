@@ -1,0 +1,55 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  nightly-k8s:
+    # The k8s topology: kind + Calico + metrics-server via k8s/apply.ps1,
+    # then the three k8s suites. Slower and heavier than the push tier, so
+    # it runs on a schedule instead of every push.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Install kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Generate gateway dev cert
+        run: pwsh infra/make-cert.ps1
+
+      - name: Apply stack to fresh kind cluster
+        run: pwsh k8s/apply.ps1
+
+      - name: Port-forward gateway 18080
+        run: |
+          nohup kubectl -n corewebforms port-forward deploy/gateway 18080:8080 > /tmp/pf.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:18080/ > /dev/null && echo "gateway up" && exit 0
+            sleep 2
+          done
+          cat /tmp/pf.log
+          exit 1
+
+      - name: k8s bring-up + health-semantics suite
+        run: pwsh k8s/test-k8s.ps1 -GatewayUrl http://127.0.0.1:18080
+
+      - name: NetworkPolicy suite (Calico-enforced)
+        run: pwsh k8s/test-netpol.ps1
+
+      - name: Exposure check (k8s topology)
+        run: pwsh k8s/check-exposure.ps1

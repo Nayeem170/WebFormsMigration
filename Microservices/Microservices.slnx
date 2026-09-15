@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/Frontend/">
+    <Project Path="Frontend/CoreWebForms.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CoreWebForms.CharacterizationTests/CoreWebForms.CharacterizationTests.csproj" />
+    <Project Path="tests/CoreWebForms.UnitTests/CoreWebForms.UnitTests.csproj" />
+  </Folder>
+  <Project Path="Catalog/Catalog.csproj" />
+  <Project Path="Contracts/Contracts.csproj" />
+  <Project Path="Gateway/Gateway.csproj" />
+  <Project Path="Orders/Orders.csproj" />
+</Solution>

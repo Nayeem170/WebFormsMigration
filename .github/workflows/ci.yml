@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  push-tier:
+    # Fast gate: compile + in-process unit tests, then the full compose
+    # stack with every out-of-process suite that proves it. All creds are
+    # committed localdev values by design (demo project).
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Build solution
+        run: dotnet build Microservices/Microservices.slnx --configuration Release --nologo
+
+      - name: Unit tier (in-process, no stack)
+        run: dotnet test Microservices/Microservices.slnx --no-build --configuration Release --filter "FullyQualifiedName~UnitTests"
+
+      - name: Generate gateway dev cert
+        run: pwsh infra/make-cert.ps1
+
+      - name: Build images and start stack (base + test-ports overlay)
+        run: docker compose -f compose.yaml -f compose.test-ports.yaml up -d --wait
+
+      - name: Characterization tests (direct to replicas)
+        env:
+          CATALOG_BASE: http://127.0.0.1:18094
+          ORDERS_BASE: http://127.0.0.1:18095
+        run: dotnet test Microservices/Microservices.slnx --no-build --configuration Release --filter "FullyQualifiedName~CharacterizationTests"
+
+      - name: Smoke parity (gateway ingress + replicas)
+        run: pwsh scripts/smoke-parity.ps1 -BaseUrl http://127.0.0.1:8080 -CatalogUrl http://127.0.0.1:18094 -OrdersUrl http://127.0.0.1:18095
+
+      - name: Failure-injection suite (compose topology)
+        run: pwsh scripts/test-failures.ps1 -Topology compose
+
+      - name: Exposure check (every published port loopback)
+        run: pwsh scripts/check-exposure.ps1
