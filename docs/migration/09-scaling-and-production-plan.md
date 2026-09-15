@@ -1527,6 +1527,76 @@ Phase 7 execution record (2026-09-15, part 2 - roles, Calico, routed IdP):
   check-exposure -OpenedGate. For k8s the same swap lands on the
   port-forward address (or kind extraPortMappings on the next rebuild).
 
+Phase 7 execution record (2026-09-15, part 3 - realm and edge hardening):
+
+- One realm at the edge, not all of them. The YARP route and the write
+  gate both name /realms/corewebforms explicitly (appsettings + k8s
+  ConfigMap; the gate's StartSegments check likewise). The original
+  /realms/{**catch-all} published the MASTER realm through the edge:
+  master ships admin-cli as a public client with direct grants, so
+  POST /realms/master/.../token with the bootstrap admin credentials
+  would have been an online password oracle the moment the bind opened
+  (/admin was never routed, but the oracle is realm-level). The suite
+  now PROVES the negative by attempting the oracle: POST admin creds to
+  the routed master token path must not process a grant (compose: 401
+  from the frontend catch-all's write gate - master falls through to
+  the app, which demands auth; any 200 with a token would fail the
+  check). The route and the gate are narrowed independently: widening
+  either one alone still leaves the other blocking master.
+- Brute-force protection is on the realm (bruteForceProtected, local
+  failureFactor 3), because it counts per-ACCOUNT - the axis the
+  gateway's socket-keyed limiter cannot cover (password guessing
+  distributes across source addresses cheaply). Proven in the suite by
+  the dedicated bf-probe user: three wrong grants, then the CORRECT
+  password must also be rejected (Keycloak events show
+  user_temporarily_disabled). Lockout that spares the right password
+  would not be lockout. failureFactor 3 is deliberately low so the
+  check is deterministic; production raises it.
+- Direct access grants moved OFF the browser client. The gateway client
+  is now code-flow only (standardFlowEnabled, PKCE enforced, no direct
+  grants); a dedicated ccw-suite client (public, direct grants,
+  standard flow disabled, not referenced by any redirect URI) exists
+  solely so the test suite can mint bearer tokens. Both clients carry
+  the audience mapper so tokens validate identically. An attacker who
+  finds ccw-suite gains exactly what the suite has: the ability to
+  attempt password grants - into a realm with brute-force lockout and
+  no privileged users.
+- PKCE is server-enforced (pkce.code.challenge.method: S256 on the
+  gateway client). The ASP.NET handler always sends the challenge, but
+  enforcement that depends on the client being well-behaved is not
+  enforcement: with a public client and no secret at the code exchange,
+  PKCE is the ONLY thing binding a redeemed code to the browser that
+  started the flow. Keycloak 26 surfaces the refusal as an empty
+  non-200 (event log: 'PKCE enforced Client without code challenge
+  method', invalid_request), which is too generic to assert alone, so
+  the suite check is an A/B: the identical authorize request plus a
+  valid S256 challenge must render the login form. Public client +
+  server-enforced PKCE is the RECORDED local-shape decision; the
+  production shape is a confidential client with the secret from the
+  orchestrator's secret store (Phase 7 step 5).
+- sslRequired stays "none" DELIBERATELY: the gateway terminates TLS and
+  the backchannel is intentionally plain HTTP inside the isolated
+  network (that is the one-URL/backchannel-dynamic design). "external"
+  is the normal production value once Keycloak listens on TLS itself;
+  recorded here so "none" does not read as an oversight.
+- Bind POLICY (recorded per review): the non-loopback bind is a
+  TIMEBOXED DEMONSTRATION, not a standing state - open it, run the full
+  suites with check-exposure -OpenedGate plus a real second machine
+  walking the routed login, record the result, close it again. Behind
+  the gateway the service tier is unauthenticated by design; compose
+  protects it only with Docker network isolation (no NetworkPolicy
+  equivalent), and k8s is the reference topology precisely because its
+  policy layer is real. If the bind is ever left standing, it stands on
+  k8s, not compose. Verification must come FROM the second machine: a
+  curl from the host to its own LAN IP takes the loopback path on
+  Windows and passes whether or not the publish reached the interface -
+  the same shape of vacuous pass this engagement keeps catching.
+- Verification at these commits: compose test-auth 17/17 (incl. routed
+  browser login under server-enforced PKCE, master-oracle negative,
+  lockout); k8s test-auth 17/17, netpol 14/14, exposure all-pass; both
+  stacks loopback-bound. The bind demonstration itself still awaits the
+  real hostname and a second machine.
+
 ### Phase 8 - Observability
 
 Goal: see which instance did what, and know before users do.
