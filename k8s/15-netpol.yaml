@@ -122,3 +122,27 @@ spec:
       ports:
         - protocol: TCP
           port: 6379
+---
+# OTel collector: every app pod ships traces + metrics to it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-otel-collector
+  namespace: corewebforms
+spec:
+  podSelector:
+    matchLabels: { app: otel-collector }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: gateway }
+        - podSelector:
+            matchLabels: { app: frontend }
+        - podSelector:
+            matchLabels: { app: catalog }
+        - podSelector:
+            matchLabels: { app: orders }
+      ports:
+        - protocol: TCP
+          port: 4317

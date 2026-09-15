@@ -24,6 +24,27 @@ internal static class StockRules
         return false;
     }
 
+    /// <summary>
+    /// The SQLSTATE behind a transient-lock rejection, for the
+    /// ccw_reserve_lock_timeouts_total metric labels (and tests).
+    /// </summary>
+    public static string? TransientLockSqlState(Exception ex)
+    {
+        for (var e = ex; e != null; e = e.InnerException)
+        {
+            if (e is PostgresException pg && pg.SqlState is "55P03" or "40P01" or "53300") return pg.SqlState;
+            if (e is SqliteException sql && sql.SqliteErrorCode == 5) return "SQLITE_BUSY";
+        }
+        return null;
+    }
+
+    public static void CountLockTimeout(Exception ex, string operation)
+    {
+        AppMetrics.ReserveLockTimeouts.Add(1,
+            new KeyValuePair<string, object?>("sqlstate", TransientLockSqlState(ex) ?? "unknown"),
+            new KeyValuePair<string, object?>("operation", operation));
+    }
+
     // Deadlock prevention: every transaction takes row locks in the same
     // ProductId order the FOR UPDATE list uses.
     public static List<StockItemDto> OrderItemsForLock(IEnumerable<StockItemDto> items) =>

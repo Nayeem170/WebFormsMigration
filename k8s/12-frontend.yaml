@@ -30,6 +30,8 @@ spec:
               valueFrom: { configMapKeyRef: { name: corewebforms-config, key: orders-baseurl } }
             - name: Http__PooledConnectionLifetimeSeconds
               valueFrom: { configMapKeyRef: { name: corewebforms-config, key: pooled-lifetime } }
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector:4317
           ports:
             - containerPort: 8081
           # Sized off Phase 3's measured ~23s cold ASPX compile, with margin

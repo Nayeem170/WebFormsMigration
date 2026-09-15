@@ -2,7 +2,6 @@ using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
 using System.Globalization;
 using Catalog;
-using Catalog.Logging;
 using Inventory.Contracts;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -10,18 +9,10 @@ using Npgsql;
 
     var builder = WebApplication.CreateBuilder(args);
     builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(25));
+    builder.Services.AddAppTelemetry("catalog").AddOtlpExporting(builder.Configuration);
 
 var urls = builder.Configuration["Urls"] ?? "http://localhost:8094";
 builder.WebHost.UseUrls(urls);
-
-var logPath = Path.Combine(builder.Environment.ContentRootPath, "App_Data", "logs", "app.log");
-try
-{
-    Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
-    builder.Logging.AddProvider(new FileLoggerProvider(logPath));
-}
-catch (IOException) { }
-catch (UnauthorizedAccessException) { }
 
 var dbPathSetting = builder.Configuration["Database:Path"];
 var dbPath = !string.IsNullOrEmpty(dbPathSetting)
@@ -45,6 +36,18 @@ else
 
 var runAsMigrator = args.Contains("--migrate");
 var migrateOnStartup = runAsMigrator || builder.Configuration.GetValue<bool?>("Database:Migrate") == true;
+
+// Readiness signal without a request: same SELECT 1 rule as the endpoint
+// (real bytes on the socket), on a timer, into the ccw_readiness gauge.
+builder.Services.AddHostedService(sp => new ReadinessMonitor(
+    sp, sp.GetRequiredService<ILogger<ReadinessMonitor>>(),
+    async (p, ct) =>
+    {
+        using var scope = p.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await db.Database.ExecuteSqlRawAsync("SELECT 1", ct);
+        return true;
+    }));
 
 var app = builder.Build();
 
@@ -230,6 +233,7 @@ app.MapPost("/api/products/reserve", (ReserveStockRequest request, AppDbContext 
     }
     catch (Exception ex) when (StockRules.IsTransientLock(ex))
     {
+        StockRules.CountLockTimeout(ex, "reserve");
         return TransientLockError();
     }
 });
@@ -266,6 +270,7 @@ app.MapPost("/api/products/release", (ReleaseStockRequest request, AppDbContext 
     }
     catch (Exception ex) when (StockRules.IsTransientLock(ex))
     {
+        StockRules.CountLockTimeout(ex, "release");
         return TransientLockError();
     }
 });

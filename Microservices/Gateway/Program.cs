@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(25));
+builder.Services.AddAppTelemetry("gateway").AddOtlpExporting(builder.Configuration);
 
 var urls = builder.Configuration["Urls"] ?? "http://localhost:8080";
 builder.WebHost.UseUrls(urls);
@@ -54,11 +55,11 @@ app.Use(async (context, next) =>
 
     var incoming = context.Request.Headers[CorrelationHeader.Name].ToString();
     // Client-settable logged field: validate strictly (32 hex, the mint
-    // format) or replace. Newline injection, forged correlation, and Phase 8
-    // forged trace attributes all start with trusting this header.
+    // format) or replace. With tracing on, the mint IS the trace id -
+    // one identifier for logs, headers, and spans.
     var correlationId = CorrelationId.IsValid(incoming)
         ? incoming
-        : Guid.NewGuid().ToString("N");
+        : Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
     context.Items[CorrelationHeader.Name] = correlationId;
     context.Request.Headers[CorrelationHeader.Name] = correlationId;
     context.Response.OnStarting(() =>
@@ -104,6 +105,19 @@ app.MapGet("/health", () => Results.Ok(new { status = "alive" }));
 app.MapGet("/health/live", () => Results.Ok(new { status = "alive" }));
 app.MapGet("/health/ready", () => Results.Ok(new { status = "ready" }));
 
-app.MapReverseProxy();
+// W3C trace context across the proxy hop: YARP's forwarder does not go
+// through HttpClient instrumentation, so traceparent is injected here,
+// inside the proxy branch where Activity.Current is the request activity.
+// Without it every frontend span would start a fresh root trace.
+app.MapReverseProxy(proxyPipeline =>
+{
+    proxyPipeline.Use((ctx, next) =>
+    {
+        var activity = Activity.Current;
+        if (activity != null)
+            ctx.Request.Headers["traceparent"] = $"00-{activity.TraceId}-{activity.SpanId}-01";
+        return next();
+    });
+});
 
 app.Run();

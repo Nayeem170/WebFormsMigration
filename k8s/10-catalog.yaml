@@ -40,6 +40,8 @@ spec:
               valueFrom: { secretKeyRef: { name: corewebforms-catalog-db, key: app } }
             - name: Database__Migrate
               value: "false"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector:4317
           ports:
             - containerPort: 8094
           startupProbe:

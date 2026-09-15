@@ -34,6 +34,7 @@ $expected = @{
     'frontend2'      = @()
     'catalog-migrator' = @()
     'orders-migrator'  = @()
+    'otel-collector'   = @()
 }
 
 # One port may leave loopback, ever: gateway TLS. Plain-HTTP 8080 stays

@@ -1,26 +1,41 @@
 using System;
-using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 namespace CoreWebForms.Core
 {
+    /// <summary>
+    /// Legacy app-facing logger: interface kept (pages and services call
+    /// it), implementation now delegates to Microsoft.Extensions.Logging
+    /// JSON stdout instead of System.Diagnostics.Trace. The Trace route
+    /// was invisible to docker/kubectl logging and its file listener had
+    /// no rotation and local-time timestamps.
+    /// </summary>
     public class AppLogger : ILogger
     {
+        private static volatile Microsoft.Extensions.Logging.ILogger _sink =
+            Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+
+        internal static void Use(ILoggerFactory factory)
+        {
+            _sink = factory.CreateLogger("CoreWebForms.App");
+        }
+
         public void Info(string message)
         {
-            Trace.TraceInformation(Prefix(message));
+            _sink.LogInformation("{AppMessage}", Prefix(message));
         }
 
         public void Warning(string message)
         {
-            Trace.TraceWarning(Prefix(message));
+            _sink.LogWarning("{AppMessage}", Prefix(message));
         }
 
         public void Error(string message, Exception? ex = null)
         {
             if (ex != null)
-                Trace.TraceError("{0} | {1}", Prefix(message), ex.ToString());
+                _sink.LogError(ex, "{AppMessage}", Prefix(message));
             else
-                Trace.TraceError(Prefix(message));
+                _sink.LogError("{AppMessage}", Prefix(message));
         }
 
         private static string Prefix(string message)

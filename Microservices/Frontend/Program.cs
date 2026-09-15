@@ -16,6 +16,16 @@ namespace CoreWebForms
 {
     public class Program
     {
+        // Volatile mirror of the warmup result so the readiness monitor
+        // (separate DI service) sees it without request traffic.
+        private static volatile bool SessionReadyField;
+
+        internal static bool SessionReady
+        {
+            get => SessionReadyField;
+            private set => SessionReadyField = value;
+        }
+
         private static readonly string InstanceId =
             Environment.MachineName + ":" + Process.GetCurrentProcess().Id;
 
@@ -23,6 +33,7 @@ namespace CoreWebForms
         {
             var builder = WebApplication.CreateBuilder(args);
             builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(25));
+            builder.Services.AddAppTelemetry("frontend").AddOtlpExporting(builder.Configuration);
 
             var urls = builder.Configuration["Urls"] ?? "http://localhost:8081";
             builder.WebHost.UseUrls(urls);
@@ -53,6 +64,28 @@ namespace CoreWebForms
             }
             builder.Services.AddSession();
 
+            if (!string.IsNullOrEmpty(sessionRedis))
+            {
+                // Key-ring skew visibility: per-replica key count + active
+                // key identity, sampled from the shared ring.
+                builder.Services.AddHostedService(sp => new Services.KeyRingMonitor(
+                    sp.GetRequiredService<StackExchange.Redis.IConnectionMultiplexer>(),
+                    sp.GetRequiredService<ILogger<Services.KeyRingMonitor>>()));
+            }
+            // Readiness sampled without requests (ccw_readiness gauge):
+            // warmup done AND session store pingable when redis-backed.
+            builder.Services.AddHostedService(sp => new ReadinessMonitor(
+                sp, sp.GetRequiredService<ILogger<ReadinessMonitor>>(),
+                async (p, ct) =>
+                {
+                    if (!SessionReady) return false;
+                    var mux = p.GetService<StackExchange.Redis.IConnectionMultiplexer>();
+                    if (mux == null) return true;
+                    var ping = mux.GetDatabase().PingAsync();
+                    var winner = await Task.WhenAny(ping, Task.Delay(500, ct));
+                    return winner == ping && ping.IsCompletedSuccessfully;
+                }));
+
             builder.Services.AddSystemWebAdapters()
                 .AddJsonSessionSerializer(options =>
                 {
@@ -66,6 +99,7 @@ namespace CoreWebForms
                 .AddDynamicPages();
 
             var app = builder.Build();
+            Core.AppLogger.Use(app.Services.GetRequiredService<ILoggerFactory>());
 
             app.Use(async (context, next) =>
             {
@@ -85,30 +119,9 @@ namespace CoreWebForms
             }
 
             var sessionReady = false;
+            SessionReady = false;
 
             var contentRoot = app.Environment.ContentRootPath;
-
-            if (Trace.Listeners["console"] == null)
-            {
-                Trace.Listeners.Add(new ConsoleTraceListener { Name = "console" });
-            }
-            try
-            {
-                var logDir = Path.Combine(contentRoot, "App_Data", "logs");
-                Directory.CreateDirectory(logDir);
-                var logPath = Path.Combine(logDir, "app.log");
-                if (Trace.Listeners["file"] == null)
-                {
-                    var listener = new TextWriterTraceListener(logPath, "file")
-                    {
-                        TraceOutputOptions = TraceOptions.DateTime
-                    };
-                    Trace.Listeners.Add(listener);
-                }
-            }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-            Trace.AutoFlush = true;
 
             var dbPathSetting = builder.Configuration["Database:Path"];
             var dbPath = !string.IsNullOrEmpty(dbPathSetting)
@@ -218,6 +231,7 @@ namespace CoreWebForms
                             }
                         }
                         sessionReady = warmed;
+                        SessionReady = warmed;
                     });
                 });
 

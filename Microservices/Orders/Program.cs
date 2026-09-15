@@ -6,10 +6,10 @@ using System.Linq;
 using Inventory.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Orders;
-using Orders.Logging;
 
     var builder = WebApplication.CreateBuilder(args);
     builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(25));
+    builder.Services.AddAppTelemetry("orders").AddOtlpExporting(builder.Configuration);
 
 var urls = builder.Configuration["Urls"] ?? "http://localhost:8095";
 builder.WebHost.UseUrls(urls);
@@ -40,14 +40,16 @@ else
 var runAsMigrator = args.Contains("--migrate");
 var migrateOnStartup = runAsMigrator || builder.Configuration.GetValue<bool?>("Database:Migrate") == true;
 
-var logPath = Path.Combine(builder.Environment.ContentRootPath, "App_Data", "logs", "app.log");
-try
-{
-    Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
-    builder.Logging.AddProvider(new FileLoggerProvider(logPath));
-}
-catch (IOException) { }
-catch (UnauthorizedAccessException) { }
+// Same readiness rule as the endpoint, sampled into ccw_readiness.
+builder.Services.AddHostedService(sp => new ReadinessMonitor(
+    sp, sp.GetRequiredService<ILogger<ReadinessMonitor>>(),
+    async (p, ct) =>
+    {
+        using var scope = p.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await db.Database.ExecuteSqlRawAsync("SELECT 1", ct);
+        return true;
+    }));
 
 var app = builder.Build();
 

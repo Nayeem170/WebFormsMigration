@@ -66,7 +66,7 @@ services:
     build:
       context: .
       dockerfile: Microservices/Catalog/Dockerfile
-    environment:
+    environment: &catalog-env
       Urls: http://0.0.0.0:8094
       Database__Provider: postgres
       # MaxPoolSize=20: admission control per process (bounds concurrent
@@ -75,6 +75,7 @@ services:
       # (4 catalog + 4 orders HPA max) x 20 = 160 <= 180.
       Database__ConnectionString: Host=postgres;Port=5432;Database=ccw_catalog;Username=ccw_app;Password=localdev;MaxPoolSize=20
       Database__Migrate: "false"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     depends_on:
       postgres:
         condition: service_healthy
@@ -94,11 +95,10 @@ services:
     build:
       context: .
       dockerfile: Microservices/Orders/Dockerfile
-    environment:
+    environment: &orders-env
+      <<: *catalog-env
       Urls: http://0.0.0.0:8095
-      Database__Provider: postgres
       Database__ConnectionString: Host=postgres;Port=5432;Database=ccw_orders;Username=ccw_app;Password=localdev;MaxPoolSize=20
-      Database__Migrate: "false"
       Services__Catalog__BaseUrl: http://catalog:8094,http://catalog2:8094
     depends_on:
       postgres:
@@ -119,12 +119,13 @@ services:
     build:
       context: .
       dockerfile: Microservices/Frontend/Dockerfile
-    environment:
+    environment: &frontend-env
       Urls: http://0.0.0.0:8081
       Database__Migrate: "false"
       Session__Redis: redis:6379
       Services__Products__BaseUrl: http://catalog:8094,http://catalog2:8094
       Services__Orders__BaseUrl: http://orders:8095,http://orders2:8095
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     depends_on:
       redis:
         condition: service_healthy
@@ -144,6 +145,16 @@ services:
   frontend2:
     <<: *frontend-service
 
+  # Telemetry sink for the whole compose topology. Debug exporter to
+  # stdout: the observability controls assert on `docker compose logs
+  # otel-collector`. ADOT distro image (ECR public, digest-pinned like
+  # postgres/redis - no Docker Hub dependency).
+  otel-collector:
+    image: public.ecr.aws/aws-observability/aws-otel-collector:v0.43.1@sha256:db725ac7007ef1d9b5a357a59f3b964ab9e1df23ebb0dfc694275019048b489b
+    command: ["--config=/etc/otel-collector.yaml"]
+    volumes:
+      - ./infra/otel-collector.yaml:/etc/otel-collector.yaml:ro
+
   gateway:
     build:
       context: .
@@ -158,6 +169,7 @@ services:
       Kestrel__Endpoints__Https__Certificate__Path: /certs/gateway.pfx
       Kestrel__Endpoints__Https__Certificate__Password: ${GATEWAY_CERT_PASSWORD:-localdev-cert}
       Kestrel__Endpoints__Management__Url: http://0.0.0.0:8090
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     volumes:
       - ./infra/certs:/certs:ro
     depends_on:

@@ -76,6 +76,8 @@ spec:
               valueFrom: { secretKeyRef: { name: gateway-tls, key: password } }
             - name: Kestrel__Endpoints__Management__Url
               value: http://0.0.0.0:8090
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector:4317
           volumeMounts:
             - name: config
               mountPath: /app/appsettings.Production.json
