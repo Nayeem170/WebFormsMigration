@@ -6,14 +6,19 @@
 #   - an invalid token does not
 #   - rate limits trip under burst and are keyed on the socket (not XFF)
 #   - TLS terminates at the gateway
+#   - the edge publishes exactly one realm (no master admin oracle)
+#   - PKCE is enforced by the server, not by client behavior
+#   - brute-force lockout is per-account (the axis the limiter can't cover)
 param(
     [string]$GatewayUrl = 'http://127.0.0.1:8080',
     [string]$TlsUrl = 'https://127.0.0.1:8443',
     # Default is the ROUTED token endpoint (through the gateway's TLS
     # listener): the password grant doubles as proof that the routed IdP
-    # path serves backchannel-style clients, not just redirects.
+    # path serves backchannel-style clients, not just redirects. The
+    # minting client is the dedicated test-only client: the gateway's
+    # own client has NO direct grants (browser code flow only).
     [string]$TokenEndpoint = '',
-    [string]$ClientId = 'gateway',
+    [string]$ClientId = 'ccw-suite',
     [string]$Username = 'tester',
     [string]$Password = 'localdev-tester',
     # How to reach psql. Compose default; k8s runs pass the kubectl-wrapped
@@ -53,8 +58,8 @@ $token = $null
 try {
     $form = @{ grant_type = 'password'; client_id = $ClientId; username = $Username; password = $Password }
     $token = (Invoke-RestMethod -Method Post -Uri $TokenEndpoint -Body $form -SkipCertificateCheck).access_token
-} catch { Write-Host "  token acquisition failed: $_" }
-Check 'password grant yields an access token' ($null -ne $token -and $token.Length -gt 50)
+    } catch { Write-Host "  token acquisition failed: $_" }
+    Check 'password grant via suite client yields an access token' ($null -ne $token -and $token.Length -gt 50)
 
 if ($token) {
     $authed = Invoke-WebRequest "$GatewayUrl/Default.aspx" -Method Post -UseBasicParsing -SkipHttpErrorCheck `
@@ -125,6 +130,64 @@ try {
     Check 'browser login completes over the routed IdP (session cookie issued)' ($false)
     Write-Host "  browser flow failed at: $flowStep ($_)"
 }
+
+# --- edge publishes exactly one realm ---------------------------------------
+# The route is /realms/corewebforms/... only: the master realm (admin-cli,
+# bootstrap admin) must NOT have a token endpoint through the edge. Prove
+# the negative by TRYING the oracle: POST admin credentials to the routed
+# master token path and require that no grant is processed. A 200 with a
+# token would mean the whole master realm leaked past the edge.
+$masterResp = $null
+$masterBody = ''
+try {
+    $r = Invoke-WebRequest "$TlsUrl/realms/master/protocol/openid-connect/token" -Method Post `
+        -UseBasicParsing -SkipHttpErrorCheck -SkipCertificateCheck -MaximumRedirection 0 `
+        -Body @{ grant_type = 'password'; client_id = 'admin-cli'; username = 'admin'; password = 'localdev' }
+    $masterResp = $r; $masterBody = "$($r.Content)"
+} catch { $masterResp = $_.Exception.Response }
+$masterCode = if ($masterResp) { [int]$masterResp.StatusCode } else { 0 }
+Check 'master realm has no token endpoint at the edge (no admin oracle)' `
+    ($masterCode -ne 200 -and $masterBody -notmatch 'access_token')
+
+# --- PKCE is enforced by the SERVER, not by client behavior -----------------
+# The ASP.NET handler always sends a code_challenge, but Keycloak must
+# REFUSE one that is missing: with a public client and no secret at the
+# code exchange, PKCE is the only thing binding a redeemed code to the
+# browser that started the flow. Keycloak 26 surfaces this refusal as an
+# empty non-200, which alone proves little - so the check is an A/B: the
+# IDENTICAL authorize request plus a valid S256 challenge must render
+# the login form (200). Only the challenge differs; only the refusal
+# distinguishes them.
+$verifier = 'pkce-verifier-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF'
+$sha = [System.Security.Cryptography.SHA256]::Create()
+$challenge = [Convert]::ToBase64String($sha.ComputeHash([Text.Encoding]::ASCII.GetBytes($verifier))) `
+    -replace '\+', '-' -replace '/', '_' -replace '=', ''
+$authzBase = "$TlsUrl/realms/corewebforms/protocol/openid-connect/auth" +
+    "?client_id=gateway&response_type=code&scope=openid&state=x&nonce=y" +
+    "&redirect_uri=$([uri]::EscapeDataString("$TlsUrl/signin-oidc"))"
+$noPkce = Invoke-WebRequest $authzBase -UseBasicParsing -SkipHttpErrorCheck -SkipCertificateCheck
+$withPkce = Invoke-WebRequest "$authzBase&code_challenge=$challenge&code_challenge_method=S256" `
+    -UseBasicParsing -SkipHttpErrorCheck -SkipCertificateCheck
+Check 'authorize without PKCE challenge refused (server-enforced S256)' `
+    ($noPkce.StatusCode -ne 200 -and "$($noPkce.Content)" -notmatch '(?i)<form' `
+    -and $withPkce.StatusCode -eq 200 -and "$($withPkce.Content)" -match '(?i)<form')
+
+# --- brute-force lockout is per-account -------------------------------------
+# The rate limiter bounds one SOURCE ADDRESS; password guessing
+# distributes across addresses, so the realm carries
+# bruteForceProtected (failureFactor 3 locally). Drive three wrong
+# grants for the dedicated probe user, then require the CORRECT password
+# to be rejected too - lockout that spares the right password is not
+# lockout.
+$bfBad = @{ grant_type = 'password'; client_id = $ClientId; username = 'bf-probe'; password = 'not-the-password' }
+1..3 | ForEach-Object {
+    Invoke-WebRequest $TokenEndpoint -Method Post -Body $bfBad -UseBasicParsing `
+        -SkipHttpErrorCheck -SkipCertificateCheck | Out-Null
+}
+$bfGood = Invoke-WebRequest $TokenEndpoint -Method Post -UseBasicParsing -SkipHttpErrorCheck -SkipCertificateCheck `
+    -Body @{ grant_type = 'password'; client_id = $ClientId; username = 'bf-probe'; password = 'bf-probe-pw' }
+Check 'brute-force lockout denies the CORRECT password (per-account)' `
+    ($bfGood.StatusCode -ne 200 -or "$($bfGood.Content)" -notmatch 'access_token')
 
 # --- rate limits: socket-keyed, trip under burst --------------------------
 # Parallel: sequential IWR (~25 ms each) cannot exceed a 500/10s window.
