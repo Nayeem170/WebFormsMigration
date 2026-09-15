@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+  namespace: corewebforms
+  labels: { app: catalog }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: catalog }
+  template:
+    metadata:
+      labels: { app: catalog }
+    spec:
+      terminationGracePeriodSeconds: 35
+      initContainers:
+        # Same image, --migrate. The Phase 2 advisory lock serializes
+        # concurrent runners; the pod cannot go Ready before its own
+        # migration check completes. Structural gating - k8s has no
+        # service_completed_successfully.
+        - name: migrate
+          image: corewebforms-catalog:latest
+          imagePullPolicy: IfNotPresent
+          args: ["dotnet", "Catalog.dll", "--migrate"]
+          env:
+            - name: Database__Provider
+              valueFrom: { configMapKeyRef: { name: corewebforms-config, key: provider } }
+            - name: Database__ConnectionString
+              valueFrom: { secretKeyRef: { name: corewebforms-catalog-db, key: migrator } }
+      containers:
+        - name: catalog
+          image: corewebforms-catalog:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: Urls
+              value: http://0.0.0.0:8094
+            - name: Database__Provider
+              valueFrom: { configMapKeyRef: { name: corewebforms-config, key: provider } }
+            - name: Database__ConnectionString
+              valueFrom: { secretKeyRef: { name: corewebforms-catalog-db, key: app } }
+            - name: Database__Migrate
+              value: "false"
+          ports:
+            - containerPort: 8094
+          startupProbe:
+            httpGet: { path: /health/live, port: 8094 }
+            periodSeconds: 5
+            failureThreshold: 10
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8094 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8094 }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 500m, memory: 256Mi }
+            limits: { cpu: "1", memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog
+  namespace: corewebforms
+spec:
+  type: ClusterIP
+  selector: { app: catalog }
+  ports:
+    - port: 8094
+      targetPort: 8094

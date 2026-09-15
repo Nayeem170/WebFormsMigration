@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders
+  namespace: corewebforms
+  labels: { app: orders }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: orders }
+  template:
+    metadata:
+      labels: { app: orders }
+    spec:
+      terminationGracePeriodSeconds: 35
+      initContainers:
+        - name: migrate
+          image: corewebforms-orders:latest
+          imagePullPolicy: IfNotPresent
+          args: ["dotnet", "Orders.dll", "--migrate"]
+          env:
+            - name: Database__Provider
+              valueFrom: { configMapKeyRef: { name: corewebforms-config, key: provider } }
+            - name: Database__ConnectionString
+              valueFrom: { secretKeyRef: { name: corewebforms-orders-db, key: migrator } }
+      containers:
+        - name: orders
+          image: corewebforms-orders:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: Urls
+              value: http://0.0.0.0:8095
+            - name: Database__Provider
+              valueFrom: { configMapKeyRef: { name: corewebforms-config, key: provider } }
+            - name: Database__ConnectionString
+              valueFrom: { secretKeyRef: { name: corewebforms-orders-db, key: app } }
+            - name: Database__Migrate
+              value: "false"
+            - name: Services__Catalog__BaseUrl
+              valueFrom: { configMapKeyRef: { name: corewebforms-config, key: catalog-baseurl } }
+            - name: Http__PooledConnectionLifetimeSeconds
+              valueFrom: { configMapKeyRef: { name: corewebforms-config, key: pooled-lifetime } }
+          ports:
+            - containerPort: 8095
+          startupProbe:
+            httpGet: { path: /health/live, port: 8095 }
+            periodSeconds: 5
+            failureThreshold: 10
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8095 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8095 }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 500m, memory: 256Mi }
+            limits: { cpu: "1", memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders
+  namespace: corewebforms
+spec:
+  type: ClusterIP
+  selector: { app: orders }
+  ports:
+    - port: 8095
+      targetPort: 8095

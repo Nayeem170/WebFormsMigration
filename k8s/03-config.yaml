@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: corewebforms-config
+  namespace: corewebforms
+data:
+  provider: postgres
+  # ClusterIP balances per connection; default 2-min pooled lifetimes would
+  # pin callers to one pod for minutes at a stretch and starve scaled-up
+  # pods of traffic. 20s recycles connections so DNS re-resolves.
+  pooled-lifetime: "20"
+  products-baseurl: http://catalog:8094
+  orders-baseurl: http://orders:8095
+  catalog-baseurl: http://catalog:8094
+  session-redis: redis:6379
