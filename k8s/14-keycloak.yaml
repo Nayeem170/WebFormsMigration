@@ -27,10 +27,14 @@ spec:
               value: localdev
             - name: KC_HTTP_ENABLED
               value: "true"
-            # Pin the INTERNAL hostname so issuer, JWKS and the gateway's
-            # authority all agree (see compose.yaml for the rationale).
+            # Routed-IdP setup (see compose.yaml for the rationale): the
+            # pinned external issuer is the port-forward URL used for
+            # loopback verification (18443; compose owns 8443 on the host).
+            # The bind change replaces the host, not the shape.
             - name: KC_HOSTNAME
-              value: http://keycloak:8080
+              value: https://127.0.0.1:18443
+            - name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC
+              value: "true"
           volumeMounts:
             - name: realm
               mountPath: /opt/keycloak/data/import

@@ -30,9 +30,14 @@ services:
       retries: 12
 
   # Local IdP for Phase 7 verification. LOCAL-ONLY credentials; the realm
-  # comes from infra/keycloak/. KC_HOSTNAME pins the issuer so tokens minted
-  # via the host-published port (18081) validate against the authority the
-  # gateway uses inside the network (keycloak:8080).
+  # comes from infra/keycloak/. The IdP is ROUTED through the gateway
+  # (/realms, /js, /resources), so exactly one port is ever exposed.
+  # KC_HOSTNAME pins the EXTERNAL issuer (the routed https URL the browser
+  # sees); backchannel-dynamic makes Keycloak derive token/JWKS endpoints
+  # from the receiving interface, so the gateway's backchannel stays on the
+  # internal network while every browser-facing URL is the routed one.
+  # This is what survives the bind change: the external URL just becomes
+  # a real hostname + the same routed port.
   keycloak:
     image: quay.io/keycloak/keycloak:26.2
     command: ["start-dev", "--import-realm"]
@@ -40,13 +45,8 @@ services:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: localdev
       KC_HTTP_ENABLED: "true"
-      # Pin the INTERNAL hostname so issuer, JWKS and the gateway's
-      # authority all agree (a pinned external hostname makes the discovery
-      # document point the gateway at a URL unreachable from its own
-      # container). Tokens minted via the published port carry the pinned
-      # issuer and validate. Interactive browser login additionally needs a
-      # hosts-file entry (127.0.0.1 keycloak) - documented in the plan.
-      KC_HOSTNAME: http://keycloak:8080
+      KC_HOSTNAME: https://127.0.0.1:8443
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
     volumes:
       - ./infra/keycloak/corewebforms-realm.json:/opt/keycloak/data/import/realm.json:ro
     ports:
@@ -179,6 +179,7 @@ services:
       Kestrel__Endpoints__Https__Certificate__Password: ${GATEWAY_CERT_PASSWORD:-localdev-cert}
       Kestrel__Endpoints__Management__Url: http://0.0.0.0:8090
       Oidc__Authority: http://keycloak:8080/realms/corewebforms
+      Oidc__Issuer: https://127.0.0.1:8443/realms/corewebforms
       Oidc__ClientId: gateway
       Oidc__Audience: gateway
     volumes:
