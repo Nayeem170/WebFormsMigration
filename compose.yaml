@@ -29,35 +29,6 @@ services:
       timeout: 3s
       retries: 12
 
-  # Local IdP for Phase 7 verification. LOCAL-ONLY credentials; the realm
-  # comes from infra/keycloak/. The IdP is ROUTED through the gateway
-  # (/realms, /js, /resources), so exactly one port is ever exposed.
-  # KC_HOSTNAME pins the EXTERNAL issuer (the routed https URL the browser
-  # sees); backchannel-dynamic makes Keycloak derive token/JWKS endpoints
-  # from the receiving interface, so the gateway's backchannel stays on the
-  # internal network while every browser-facing URL is the routed one.
-  # This is what survives the bind change: the external URL just becomes
-  # a real hostname + the same routed port.
-  keycloak:
-    image: quay.io/keycloak/keycloak:26.2
-    command: ["start-dev", "--import-realm"]
-    environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: localdev
-      KC_HTTP_ENABLED: "true"
-      KC_HOSTNAME: https://127.0.0.1:8443
-      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
-    volumes:
-      - ./infra/keycloak/corewebforms-realm.json:/opt/keycloak/data/import/realm.json:ro
-    ports:
-      - "127.0.0.1:18081:8080"
-    healthcheck:
-      test: ["CMD", "bash", "-c", "echo > /dev/tcp/localhost/8080"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 30s
-
   catalog-migrator:
     build:
       context: .
@@ -170,26 +141,20 @@ services:
       dockerfile: Microservices/Gateway/Dockerfile
     environment:
       Urls: http://0.0.0.0:8080
-      # Phase 7: TLS termination + management port + edge auth. Kestrel
-      # ignores Urls once any Kestrel__Endpoints__ entry exists, so the main
-      # listener is declared explicitly too.
+      # TLS termination + management port. Kestrel ignores Urls once any
+      # Kestrel__Endpoints__ entry exists, so the main listener is declared
+      # explicitly too.
       Kestrel__Endpoints__Http__Url: http://0.0.0.0:8080
       Kestrel__Endpoints__Https__Url: https://0.0.0.0:8443
       Kestrel__Endpoints__Https__Certificate__Path: /certs/gateway.pfx
       Kestrel__Endpoints__Https__Certificate__Password: ${GATEWAY_CERT_PASSWORD:-localdev-cert}
       Kestrel__Endpoints__Management__Url: http://0.0.0.0:8090
-      Oidc__Authority: http://keycloak:8080/realms/corewebforms
-      Oidc__Issuer: https://127.0.0.1:8443/realms/corewebforms
-      Oidc__ClientId: gateway
-      Oidc__Audience: gateway
     volumes:
       - ./infra/certs:/certs:ro
     depends_on:
       frontend:
         condition: service_healthy
       frontend2:
-        condition: service_healthy
-      keycloak:
         condition: service_healthy
     ports:
       - "127.0.0.1:8080:8080"

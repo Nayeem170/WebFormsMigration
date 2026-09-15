@@ -45,7 +45,7 @@ function Test-Connect([string]$Target, [string]$Port, [string]$PodDeploy) {
 # --- policies present ------------------------------------------------------
 $policies = @(kubectl -n $Namespace get networkpolicy -o name 2>$null)
 Check "default-deny and allow policies exist ($($policies.Count) total)" `
-    ($policies.Count -ge 7 -and ($policies -match 'default-deny-ingress').Count -eq 1)
+    ($policies.Count -ge 6 -and ($policies -match 'default-deny-ingress').Count -eq 1)
 
 # --- DNS sanity (guards the by-name probes) --------------------------------
 $dns = kubectl -n $Namespace exec deploy/frontend -- getent hosts postgres 2>$null
@@ -53,10 +53,9 @@ Check 'in-cluster DNS resolves (getent postgres from frontend)' ($LASTEXITCODE -
 
 $catalogIp = (kubectl -n $Namespace get pods -l app=catalog -o json | ConvertFrom-Json).items[0].status.podIP
 $postgresIp = (kubectl -n $Namespace get pods -l app=postgres -o json | ConvertFrom-Json).items[0].status.podIP
-$keycloakIp = (kubectl -n $Namespace get pods -l app=keycloak -o json | ConvertFrom-Json).items[0].status.podIP
-Check 'pod IPs resolved for by-IP probes' ($catalogIp -and $postgresIp -and $keycloakIp)
+Check 'pod IPs resolved for by-IP probes' ($catalogIp -and $postgresIp)
 
-if ($catalogIp -and $postgresIp -and $keycloakIp) {
+if ($catalogIp -and $postgresIp) {
     # --- positives: the allow rules actually allow (fast OPEN) ------------
     $p1 = Test-Connect catalog 8094 deploy/frontend
     Check "positive control: frontend -> catalog:8094 by name OPEN ($($p1.Secs)s)" ($p1.Verdict -eq 'OPEN')
@@ -72,13 +71,6 @@ if ($catalogIp -and $postgresIp -and $keycloakIp) {
 
     $n2 = Test-Connect $postgresIp 5432 deploy/gateway
     Check "gateway -> postgres by pod IP DENIED (DNS taken out of the path)" ($n2.Verdict -eq 'DENIED')
-
-    $n3 = Test-Connect keycloak 8080 deploy/frontend
-    Check "frontend -> keycloak:8080 DENIED by policy (IdP unreachable pod-to-pod)" ($n3.Verdict -eq 'DENIED')
-    if ($n3.Verdict -ne 'DENIED') { Write-Host "  detail: $($n3.Detail)" }
-
-    $n4 = Test-Connect $keycloakIp 8080 deploy/frontend
-    Check "frontend -> keycloak by pod IP DENIED" ($n4.Verdict -eq 'DENIED')
 
     # --- unknown pods: default-deny catches what no allow matches ---------
     # The overrides pin imagePullPolicy: kubectl run defaults :latest tags

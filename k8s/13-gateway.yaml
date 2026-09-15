@@ -28,37 +28,9 @@ data:
                 "Address": "http://frontend:8081/"
               }
             }
-          },
-          "keycloak": {
-            "Destinations": {
-              "keycloak": {
-                "Address": "http://keycloak:8080/"
-              }
-            }
           }
         },
         "Routes": {
-          "keycloak-realms": {
-            "ClusterId": "keycloak",
-            "Order": 0,
-            "Match": {
-              "Path": "/realms/corewebforms/{**catch-all}"
-            }
-          },
-          "keycloak-js": {
-            "ClusterId": "keycloak",
-            "Order": 0,
-            "Match": {
-              "Path": "/js/{**catch-all}"
-            }
-          },
-          "keycloak-resources": {
-            "ClusterId": "keycloak",
-            "Order": 0,
-            "Match": {
-              "Path": "/resources/{**catch-all}"
-            }
-          },
           "frontend": {
             "ClusterId": "frontend",
             "Order": 1,
@@ -92,7 +64,7 @@ spec:
           env:
             - name: Urls
               value: http://0.0.0.0:8080
-            # Phase 7: TLS termination + management port + edge auth.
+            # TLS termination + management port.
             # Kestrel ignores Urls once Kestrel__Endpoints__ entries exist.
             - name: Kestrel__Endpoints__Http__Url
               value: http://0.0.0.0:8080
@@ -104,14 +76,6 @@ spec:
               valueFrom: { secretKeyRef: { name: gateway-tls, key: password } }
             - name: Kestrel__Endpoints__Management__Url
               value: http://0.0.0.0:8090
-            - name: Oidc__Authority
-              value: http://keycloak:8080/realms/corewebforms
-            - name: Oidc__Issuer
-              value: https://127.0.0.1:18443/realms/corewebforms
-            - name: Oidc__ClientId
-              value: gateway
-            - name: Oidc__Audience
-              value: gateway
           volumeMounts:
             - name: config
               mountPath: /app/appsettings.Production.json

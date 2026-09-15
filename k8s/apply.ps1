@@ -43,18 +43,11 @@ foreach ($image in 'corewebforms-catalog', 'corewebforms-orders', 'corewebforms-
     if ($LASTEXITCODE -ne 0) { throw "kind load failed for $image" }
 }
 
-# Keycloak: pull if absent locally, then load. The realm ConfigMap is built
-# from the same file compose mounts (single source of truth).
-$keycloakPresent = docker images --format '{{.Repository}}:{{.Tag}}' | Where-Object { $_ -eq 'quay.io/keycloak/keycloak:26.2' }
-if (-not $keycloakPresent) { docker pull quay.io/keycloak/keycloak:26.2 | Out-Null }
-& $kind load docker-image quay.io/keycloak/keycloak:26.2 --name $ClusterName 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'kind load failed for keycloak' }
-
 # Namespace FIRST: everything below creates namespaced objects, and on a
 # fresh cluster the namespace does not exist yet. (The original order put
 # this line after the secret/configmap block, which only ever worked
 # because the namespace pre-existed - the creates failed silently into
-# Out-Null and the gateway/keycloak pods stuck on FailedMount.)
+# Out-Null and the gateway pods stuck on FailedMount.)
 kubectl apply -f k8s/00-namespace.yaml | Out-Null
 
 # metrics-server (HPA dependency; Phase 6 installed it by hand). Pinned,
@@ -72,12 +65,6 @@ kubectl -n corewebforms delete secret gateway-tls --ignore-not-found | Out-Null
 kubectl -n corewebforms create secret generic gateway-tls `
     --from-file=gateway.pfx=$certPath --from-literal='password=localdev-cert' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'gateway-tls secret creation failed' }
-
-# The realm ConfigMap is built from the same file compose mounts (single
-# source of truth).
-kubectl -n corewebforms delete configmap keycloak-realm --ignore-not-found | Out-Null
-kubectl -n corewebforms create configmap keycloak-realm --from-file=realm.json=infra/keycloak/corewebforms-realm.json | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'keycloak-realm configmap creation failed' }
 
 kubectl -n corewebforms delete secret corewebforms-postgres corewebforms-catalog-db corewebforms-orders-db --ignore-not-found | Out-Null
 kubectl -n corewebforms create secret generic corewebforms-postgres --from-literal=user=postgres --from-literal="password=$pgPassword" | Out-Null

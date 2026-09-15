@@ -11,10 +11,10 @@
 #
 # Consequence worth stating: pod-to-pod the ONLY reachable surfaces are the
 # allows below. The gateway accepts nothing from inside the cluster (all
-# external traffic arrives via the host path); Keycloak's admin console,
-# Postgres, and Redis are unreachable from any pod that is not an explicit
-# caller. 8090 (management) is not in any allow, so it is pod-to-pod closed
-# and only reachable from the node (probes, exec).
+# external traffic arrives via the host path); Postgres and Redis are
+# unreachable from any pod that is not an explicit caller. 8090 (management)
+# is not in any allow, so it is pod-to-pod closed and only reachable from
+# the node (probes, exec).
 ---
 # Default deny: everything not explicitly allowed below is dropped.
 apiVersion: networking.k8s.io/v1
@@ -122,23 +122,3 @@ spec:
       ports:
         - protocol: TCP
           port: 6379
----
-# Keycloak: the gateway only. Nothing else in the cluster may talk to the
-# IdP - its admin console (admin/localdev) from any pod would be a full
-# realm takeover.
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-to-keycloak
-  namespace: corewebforms
-spec:
-  podSelector:
-    matchLabels: { app: keycloak }
-  policyTypes: [Ingress]
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels: { app: gateway }
-      ports:
-        - protocol: TCP
-          port: 8080
