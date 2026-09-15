@@ -23,48 +23,6 @@ jobs:
         with:
           dotnet-version: 9.0.x
 
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Build catalog image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Microservices/Catalog/Dockerfile
-          tags: corewebforms-catalog:latest
-          load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build orders image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Microservices/Orders/Dockerfile
-          tags: corewebforms-orders:latest
-          load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build frontend image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Microservices/Frontend/Dockerfile
-          tags: corewebforms-frontend:latest
-          load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build gateway image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Microservices/Gateway/Dockerfile
-          tags: corewebforms-gateway:latest
-          load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
       - name: Install kind
         run: |
           curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
@@ -74,8 +32,10 @@ jobs:
       - name: Generate gateway dev cert
         run: pwsh infra/make-cert.ps1
 
+      # apply.ps1 builds the images with plain compose build (dockerd
+      # BuildKit, no buildx container driver) and kind-loads them.
       - name: Apply stack to fresh kind cluster
-        run: pwsh k8s/apply.ps1 -SkipBuild
+        run: pwsh k8s/apply.ps1
 
       - name: Port-forward gateway 18080
         run: |
