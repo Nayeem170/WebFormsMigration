@@ -1,0 +1,12 @@
+PASS one gateway request yields one trace across >= 3 services (trace 4cd3d28e... -> Str(gateway),Str(orders),Str(catalog),Str(frontend))
+PASS ccw_readiness metric exported through collector
+PASS ccw_dataprotection metrics exported through collector
+PASS both frontend replicas report the same active key-ring key (fe1=1808962571 fe2=1808962571)
+ Container corewebforms-redis-1 Stopping 
+ Container corewebforms-redis-1 Stopped 
+PASS redis loss flips readiness monitor (both replicas aggregated)
+PASS redis loss trips key-ring monitor
+ Container corewebforms-redis-1 Starting 
+ Container corewebforms-redis-1 Started 
+PASS readiness recovers when redis returns
+observability controls: all checks passed

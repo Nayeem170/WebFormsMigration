@@ -1,0 +1,14 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  CoreWebForms.CharacterizationTests -> D:\Programming\.Net\CoreWebForms\Microservices\tests\CoreWebForms.CharacterizationTests\bin\Release\net9.0\CoreWebForms.CharacterizationTests.dll
+Test run for D:\Programming\.Net\CoreWebForms\Microservices\tests\CoreWebForms.CharacterizationTests\bin\Release\net9.0\CoreWebForms.CharacterizationTests.dll (.NETCoreApp,Version=v9.0)
+A total of 1 test files matched the specified pattern.
+  Contracts -> D:\Programming\.Net\CoreWebForms\Microservices\Contracts\bin\Release\net9.0\Inventory.Contracts.dll
+  Catalog -> D:\Programming\.Net\CoreWebForms\Microservices\Catalog\bin\Release\net9.0\Catalog.dll
+No test matches the given testcase filter `FullyQualifiedName~UnitTests` in D:\Programming\.Net\CoreWebForms\Microservices\tests\CoreWebForms.CharacterizationTests\bin\Release\net9.0\CoreWebForms.CharacterizationTests.dll
+
+  CoreWebForms.UnitTests -> D:\Programming\.Net\CoreWebForms\Microservices\tests\CoreWebForms.UnitTests\bin\Release\net9.0\CoreWebForms.UnitTests.dll
+Test run for D:\Programming\.Net\CoreWebForms\Microservices\tests\CoreWebForms.UnitTests\bin\Release\net9.0\CoreWebForms.UnitTests.dll (.NETCoreApp,Version=v9.0)
+A total of 1 test files matched the specified pattern.
+
+Passed!  - Failed:     0, Passed:    34, Skipped:     0, Total:    34, Duration: 28 ms - CoreWebForms.UnitTests.dll (net9.0)

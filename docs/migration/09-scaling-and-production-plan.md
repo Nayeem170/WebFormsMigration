@@ -1699,7 +1699,6 @@ Phase 8 and brought to green. Two workflows, first green runs
 
 #### Steps
 
-
 1. OpenTelemetry: traces and metrics from all three services plus the
    gateway, with `X-Correlation-ID` carried as the trace attribute so the
    existing three-log walk continues to work.
@@ -1713,6 +1712,58 @@ catalog with one identifier; a Grafana dashboard shows a load ramp driving
 HPA.
 
 Rollback: none needed; additive.
+
+#### Phase 8 execution record, part 1 (2026-09-15): logging, traces, metrics
+
+Ground found by survey: three logging stacks (MEL + hand-rolled file
+sink in catalog/orders, System.Diagnostics.Trace in frontend, plain MEL
+in gateway), none structured, file sinks invisible to docker/kubectl
+logging, DateTime.Now without offset, lock-file-serialize hot path.
+Executed in the reviewed order:
+
+- (a) Logging unified: JSON console formatter via appsettings in all
+  four services (tunable levels without rebuild), both FileLogger
+  copies deleted, frontend's Trace listeners removed and AppLogger
+  (interface kept for pages) delegates to MEL. test-failures local
+  mode now captures spawned-service stdout; test-k8s frontend pool
+  checks read pod stdout instead of /app/App_Data/logs/app.log.
+- (b) Traces: OpenTelemetry SDK in all four services (aspnetcore +
+  httpclient + Npgsql sources), shared wiring in Contracts
+  (AddAppTelemetry/AddOtlpExporting; OTLP only when
+  OTEL_EXPORTER_OTLP_ENDPOINT is set, so source-run stays quiet).
+  X-Correlation-ID is now seeded from the trace id at the gateway
+  (Activity.Current.TraceId is 32-hex - same format, one identifier
+  for headers, logs, and spans). YARP's forwarder is not HttpClient-
+  instrumented, so traceparent is injected inside MapReverseProxy's
+  branch - without that every frontend span rooted a fresh trace.
+- (c) Metrics on the CoreWebForms meter: ccw_readiness (per-replica
+  readiness sampled every 10s by the same rule the endpoint serves,
+  transitions logged), ccw_dataprotection_keys +
+  ccw_dataprotection_active_key_fingerprint (the recorded key-ring
+  skew deliverable - ring read via LIST, the library's actual storage
+  format; HVALS and per-key StringGet both answered WRONGTYPE before
+  redis TYPE said LIST), ccw_reserve_lock_timeouts_total{sqlstate,
+  operation} (classification pure and unit-tested:
+  TransientLockSqlState), plus ASP.NET/HttpClient/Npgsql built-ins.
+- Collector: one ADOT collector (ECR public, digest-pinned) in compose
+  and k8s, debug exporter to its own stdout - backends stay local-only
+  per the scope rule; CI asserts on collector output.
+- Positive controls (scripts/test-observability.ps1, in the push
+  tier): one gateway request -> ONE trace across >= 3 services;
+  ccw_* metric names in the export; both frontend replicas report the
+  same active key fingerprint; killing redis flips the readiness
+  monitor and trips the key-ring monitor, and both recover. The
+  recovery check is gated on having observed the flip.
+- Carry-over fix: the concurrent-reserve test now counts attempts and
+  asserts <= 4 per key (1 + 3 retries), so a rising 503 rate shows in
+  the attempt count instead of hiding behind retries.
+- Unit tier: 34 facts (10 new - key-ring parser, lock-state
+  classification for metric labels).
+- Deferred to part 2: alert rules (pool saturation, 503 rate,
+  readiness flapping, key-ring divergence) on local-only
+  Prometheus/Grafana per the scope rule; OTel log pipeline; Tempo.
+  Npgsql meter instrument names need runtime verification before any
+  alert binds to them.
 
 ### Phase 9 - Operations runbook
 
